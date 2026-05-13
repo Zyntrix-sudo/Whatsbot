@@ -2,6 +2,7 @@ services:
   - type: worker
     name: whatsapp-ai-bot
     env: node
+    rootDir: whatsapp-ai-bot
     buildCommand: npm install
     startCommand: npm start
     autoDeploy: true
