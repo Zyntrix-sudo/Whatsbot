@@ -1,10 +1,18 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  downloadContentFromMessage,
+  generateWAMessageContent,
+  generateWAMessageFromContent,
+} = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const crypto = require('crypto');
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -103,12 +111,35 @@ const BOT_INFO = {
   commandPrefix: 'rest',
 };
 
+const COMMAND_ALIASES = {
+  menu: 'help',
+  h: 'help',
+  owner: 'owner',
+  ai: 'ask',
+  gpt: 'ask',
+  img: 'imagine',
+  image: 'imagine',
+  sm: 'movie',
+  ytmp3: 'youtube',
+  song: 'youtube',
+  ytmp4: 'youtube',
+  ytvid: 'youtube',
+  ttdl: 'tiktok',
+  igdl: 'instagram',
+  gcstatus: 'gcstatus',
+  swgc: 'gcstatus',
+  upswgc: 'gcstatus',
+  vv: 'vv',
+};
+
 const OWNER_COMMANDS = new Set([
   'help',
+  'owner',
   'ping',
   'alive',
   'uptime',
   'pause',
+  'ask',
   'game',
   'tiktok',
   'youtube',
@@ -119,6 +150,8 @@ const OWNER_COMMANDS = new Set([
   'tictactoe',
   'move',
   'imagine',
+  'gcstatus',
+  'vv',
 ]);
 
 const BOT_STATE = {
@@ -248,16 +281,7 @@ function isOwner(jid) {
 }
 
 function isCommand(text) {
-  const value = text.trim();
-  if (!value.toLowerCase().startsWith(`${BOT_INFO.commandPrefix} `)) {
-    return false;
-  }
-
-  const afterPrefix = value.slice(BOT_INFO.commandPrefix.length + 1).trim().toLowerCase();
-  const firstWord = afterPrefix.split(/\s+/)[0];
-
-  // Check if the first word after "rest" is a valid command
-  return OWNER_COMMANDS.has(firstWord) || firstWord === 'run';
+  return Boolean(getCommandPrefix(text) && parseCommand(text).command);
 }
 
 function extractUrl(text) {
@@ -278,7 +302,8 @@ function inferDownloadCommand(url) {
 }
 
 function parseCommand(text) {
-  const cleanText = stripOwnerPrefix(text).toLowerCase();
+  const rawText = stripOwnerPrefix(text);
+  const cleanText = rawText.toLowerCase();
   const words = cleanText.split(/\s+/).filter(Boolean);
   if (!words.length) return { command: null, args: [] };
 
@@ -288,26 +313,8 @@ function parseCommand(text) {
   }
 
   // Direct commands
-  const direct = args[0];
-  if (
-    [
-      'help',
-      'ping',
-      'alive',
-      'uptime',
-      'pause',
-      'game',
-      'tiktok',
-      'youtube',
-      'facebook',
-      'instagram',
-      'download',
-      'movie',
-      'tictactoe',
-      'move',
-      'imagine',
-    ].includes(direct)
-  ) {
+  const direct = COMMAND_ALIASES[args[0]] || args[0];
+  if (OWNER_COMMANDS.has(direct)) {
     return { command: direct, args: args.slice(1) };
   }
 
@@ -354,11 +361,15 @@ function parseCommand(text) {
 
 function stripOwnerPrefix(text) {
   const value = text.trim();
-  if (!/^rest\b/i.test(value)) {
-    return value;
+  if (/^\./.test(value)) {
+    return value.slice(1).trim();
   }
 
-  return value.replace(/^rest\b\s*/i, '').trim();
+  if (/^rest\b/i.test(value)) {
+    return value.replace(/^rest\b\s*/i, '').trim();
+  }
+
+  return value;
 }
 
 function isImagePrompt(text) {
@@ -380,6 +391,185 @@ function extractImagePrompt(text) {
     .replace(/^draw\s*/i, '')
     .replace(/^imagine\s*/i, '')
     .trim();
+}
+
+function getCommandPrefix(text) {
+  const value = String(text || '').trim();
+  if (!value) return null;
+
+  if (value.startsWith('.')) return '.';
+  if (/^rest\b/i.test(value)) return 'rest';
+  return null;
+}
+
+function getContextInfo(message) {
+  if (!message) return null;
+
+  return (
+    message.extendedTextMessage?.contextInfo ||
+    message.imageMessage?.contextInfo ||
+    message.videoMessage?.contextInfo ||
+    message.audioMessage?.contextInfo ||
+    message.documentMessage?.contextInfo ||
+    message.buttonsResponseMessage?.contextInfo ||
+    message.listResponseMessage?.contextInfo ||
+    null
+  );
+}
+
+function unwrapMessageContainer(message) {
+  if (!message) return null;
+
+  const nested =
+    message.ephemeralMessage?.message ||
+    message.viewOnceMessage?.message ||
+    message.viewOnceMessageV2?.message ||
+    message.viewOnceMessageV2Extension?.message ||
+    message.documentWithCaptionMessage?.message ||
+    message.editedMessage?.message?.protocolMessage?.editedMessage;
+
+  return nested ? unwrapMessageContainer(nested) : message;
+}
+
+function getQuotedMessage(msg) {
+  const contextInfo = getContextInfo(msg?.message);
+  return unwrapMessageContainer(contextInfo?.quotedMessage || null);
+}
+
+function getQuotedMedia(quotedMessage) {
+  if (!quotedMessage) return null;
+
+  if (quotedMessage.imageMessage) {
+    return {
+      kind: 'image',
+      payload: quotedMessage.imageMessage,
+      sendOptions: {
+        image: undefined,
+        caption: quotedMessage.imageMessage.caption || '',
+      },
+    };
+  }
+
+  if (quotedMessage.videoMessage) {
+    return {
+      kind: 'video',
+      payload: quotedMessage.videoMessage,
+      sendOptions: {
+        video: undefined,
+        caption: quotedMessage.videoMessage.caption || '',
+      },
+    };
+  }
+
+  if (quotedMessage.audioMessage) {
+    return {
+      kind: 'audio',
+      payload: quotedMessage.audioMessage,
+      sendOptions: {
+        audio: undefined,
+        mimetype: quotedMessage.audioMessage.mimetype || 'audio/mp4',
+        ptt: Boolean(quotedMessage.audioMessage.ptt),
+      },
+    };
+  }
+
+  return null;
+}
+
+async function streamToBuffer(stream) {
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+async function downloadQuotedMediaBuffer(kind, payload) {
+  const stream = await downloadContentFromMessage(payload, kind);
+  return streamToBuffer(stream);
+}
+
+function extractMediaMessage(message) {
+  const unwrapped = unwrapMessageContainer(message);
+  if (!unwrapped) return null;
+
+  if (unwrapped.imageMessage) {
+    return { kind: 'image', payload: unwrapped.imageMessage };
+  }
+
+  if (unwrapped.videoMessage) {
+    return { kind: 'video', payload: unwrapped.videoMessage };
+  }
+
+  if (unwrapped.audioMessage) {
+    return { kind: 'audio', payload: unwrapped.audioMessage };
+  }
+
+  return null;
+}
+
+async function isGroupAdmin(groupJid, participantJid) {
+  try {
+    const metadata = await sock.groupMetadata(groupJid);
+    const participant = metadata.participants.find((item) => normalizeJid(item.id) === normalizeJid(participantJid));
+    return Boolean(participant && (participant.admin === 'admin' || participant.admin === 'superadmin'));
+  } catch (error) {
+    console.error('Group metadata error:', error.message);
+    return false;
+  }
+}
+
+async function sendGroupStatusMessage(groupJid, sourceMessage, caption) {
+  const quotedMessage = getQuotedMessage(sourceMessage);
+  const media = extractMediaMessage(quotedMessage || sourceMessage.message);
+
+  if (!media && !caption) {
+    return 'Reply image/video/audio or add text. Example: `.gcstatus Hello group`';
+  }
+
+  let payload = {};
+
+  if (media?.kind === 'image') {
+    const buffer = await downloadQuotedMediaBuffer('image', media.payload);
+    payload = { image: buffer, caption };
+  } else if (media?.kind === 'video') {
+    const buffer = await downloadQuotedMediaBuffer('video', media.payload);
+    payload = { video: buffer, caption };
+  } else if (media?.kind === 'audio') {
+    const buffer = await downloadQuotedMediaBuffer('audio', media.payload);
+    payload = {
+      audio: buffer,
+      mimetype: media.payload.mimetype || 'audio/mp4',
+      ptt: Boolean(media.payload.ptt),
+    };
+  } else {
+    payload = { text: caption };
+  }
+
+  const inside = await generateWAMessageContent(payload, {
+    upload: sock.waUploadToServer,
+  });
+
+  const messageSecret = crypto.randomBytes(32);
+  const statusMessage = generateWAMessageFromContent(
+    groupJid,
+    {
+      messageContextInfo: { messageSecret },
+      groupStatusMessageV2: {
+        message: {
+          ...inside,
+          messageContextInfo: { messageSecret },
+        },
+      },
+    },
+    {}
+  );
+
+  await sock.relayMessage(groupJid, statusMessage.message, {
+    messageId: statusMessage.key.id,
+  });
+
+  return null;
 }
 
 function shouldReplyInGroup(msg, text) {
@@ -662,23 +852,13 @@ function formatUptime() {
 async function handleOwnerCommand(command, args, replyJid, senderJid) {
   switch (command) {
     case 'help':
+      return buildHelpMenu();
+
+    case 'owner':
       return [
-        `*${BOT_INFO.name} Help Menu*`,
-        '',
-        'You fit also talk naturally like: `rest execute my help menu`, `rest lets play tic tac toe`, `rest download this vid`, or `rest hi`.',
-        '`rest help` - show this menu',
-        '`rest ping` - check my speed',
-        '`rest alive` - confirm I am online',
-        '`rest uptime` - show uptime',
-        '`rest pause` - pause or resume replies',
-        '`rest imagine <prompt>` - generate an image',
-        '`rest youtube <url>` - YouTube downloader',
-        '`rest facebook <url>` - Facebook downloader',
-        '`rest instagram <url>` - Instagram downloader',
-        '`rest tiktok <url>` - TikTok downloader',
-        '`rest movie <title>` - search movies',
-        '`rest tictactoe` - start tic-tac-toe',
-        '`rest move <row> <col>` - make a tic-tac-toe move',
+        `*${BOT_INFO.name} Owner*`,
+        `Owner number: ${CONFIG.ownerNumber.replace('@s.whatsapp.net', '')}`,
+        `Developer: ${BOT_INFO.developer}`,
       ].join('\n');
 
     case 'ping':
@@ -798,9 +978,74 @@ ${renderTicTacToeBoard(userData.ticTacToe.board)}`;
       return null;
     }
 
+    case 'vv':
+      return null;
+
     default:
       return 'I no know that command. Use `rest help`.';
   }
+}
+
+function buildHelpMenu() {
+  const now = new Date();
+  const dateText = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(now);
+  const timeText = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(now);
+
+  return [
+    '┏❐ *◈ Rest AI ◈*',
+    '┃',
+    `┃├◆ 👤 Owner: ${BOT_INFO.developer}`,
+    `┃├◆ 📅 Date: ${dateText}`,
+    `┃├◆ ⏰ Time: ${timeText}`,
+    `┃├◆ ⚡ Commands: ${OWNER_COMMANDS.size}+`,
+    `┃├◆ 🔑 Prefix: ${BOT_INFO.commandPrefix} / .`,
+    '┗❐',
+    '',
+    '┏❐ 《 *OWNER MENU* 》 ❐',
+    '┃├◆ .menu / rest help',
+    '┃├◆ .owner',
+    '┃├◆ .ping / .alive / .uptime',
+    '┃├◆ .pause',
+    '┗❐',
+    '',
+    '┏❐ 《 *AI MENU* 》 ❐',
+    '┃├◆ .ai / .gpt [question]',
+    '┃├◆ .img [image prompt]',
+    '┃├◆ rest [question]',
+    '┗❐',
+    '',
+    '┏❐ 《 *MEDIA MENU* 》 ❐',
+    '┃├◆ .vv',
+    '┃├◆ .gcstatus / .swgc [text]',
+    '┗❐',
+    '',
+    '┏❐ 《 *MOVIE MENU* 》 ❐',
+    '┃├◆ .movie / .sm [title]',
+    '┗❐',
+    '',
+    '┏❐ 《 *GAME MENU* 》 ❐',
+    '┃├◆ .game',
+    '┃├◆ .tictactoe',
+    '┃├◆ .move [row] [col]',
+    '┗❐',
+    '',
+    '┏❐ 《 *DOWNLOAD MENU* 》 ❐',
+    '┃├◆ .youtube / .ytmp3 / .ytmp4 / .song / .ytvid [url]',
+    '┃├◆ .facebook [url]',
+    '┃├◆ .instagram / .igdl [url]',
+    '┃├◆ .tiktok / .ttdl [url]',
+    '┗❐',
+    '',
+    '_Powered by Rest AI © 2026_',
+  ].join('\n');
 }
 
 async function connectToWhatsApp() {
@@ -891,8 +1136,8 @@ async function connectToWhatsApp() {
     console.log(`Message from ${senderJid} in ${replyJid}: ${text}`);
 
     try {
-      // Check if message starts with "rest" prefix
-      const startsWithRest = /^rest\b/i.test(text.trim());
+      const commandPrefix = getCommandPrefix(text);
+      const startsWithRest = commandPrefix === 'rest';
 
       if (isCommand(text)) {
         if (!isOwner(senderJid)) {
@@ -900,6 +1145,86 @@ async function connectToWhatsApp() {
         }
 
         if (ownerCommand) {
+          if (parsedOwnerCommand.command === 'gcstatus') {
+            if (!isGroup) {
+              await sock.sendMessage(replyJid, { text: 'Group only command.' });
+              return;
+            }
+
+            const isAdmin = await isGroupAdmin(replyJid, senderJid);
+            if (!isAdmin) {
+              await sock.sendMessage(replyJid, { text: 'Admin only command.' });
+              return;
+            }
+
+            const caption = parsedOwnerCommand.args.join(' ').trim();
+            const result = await sendGroupStatusMessage(replyJid, msg, caption);
+            if (result) {
+              await sock.sendMessage(replyJid, { text: result });
+              return;
+            }
+
+            await sock.sendMessage(replyJid, { text: 'Group status sent.' });
+            return;
+          }
+
+          if (parsedOwnerCommand.command === 'vv') {
+            const quotedMessage = getQuotedMessage(msg);
+            if (!quotedMessage) {
+              await sock.sendMessage(replyJid, { text: 'Reply to a view-once image, video, or audio with `.vv` or `rest vv`.' });
+              return;
+            }
+
+            const media = getQuotedMedia(quotedMessage);
+            if (!media) {
+              await sock.sendMessage(replyJid, { text: 'No supported media found in that quoted message.' });
+              return;
+            }
+
+            await sock.sendMessage(replyJid, { text: `I dey extract the ${media.kind} now...` });
+            const buffer = await downloadQuotedMediaBuffer(media.kind, media.payload);
+            const sendPayload = {
+              ...media.sendOptions,
+              [media.kind]: buffer,
+            };
+            await sock.sendMessage(replyJid, sendPayload);
+            return;
+          }
+
+          if (parsedOwnerCommand.command === 'ask') {
+            const promptText = parsedOwnerCommand.args.join(' ').trim();
+            if (!promptText) {
+              await sock.sendMessage(replyJid, { text: 'Send a question like `.ai who be your developer?`' });
+              return;
+            }
+
+            const userData = getUserData(senderJid);
+            userData.name = extractNameFromMessage(promptText, userData.name);
+            userData.conversationHistory.push({
+              role: 'user',
+              content: promptText,
+            });
+            userData.conversationHistory = truncateHistory(userData.conversationHistory, 20);
+            saveUserData(senderJid, userData);
+
+            await sock.sendPresenceUpdate('composing', replyJid);
+            const prompt = buildAiPrompt(userData, promptText, isGroup);
+            const aiReply = await getAiReply(prompt);
+            const finalReply = aiReply || 'The AI no answer me just now. Try again small.';
+
+            userData.conversationHistory.push({
+              role: 'assistant',
+              content: finalReply,
+            });
+            userData.conversationHistory = truncateHistory(userData.conversationHistory, 20);
+            userData.firstTime = false;
+            saveUserData(senderJid, userData);
+
+            await sock.sendMessage(replyJid, { text: finalReply });
+            await sock.sendPresenceUpdate('available', replyJid);
+            return;
+          }
+
           const response = await handleOwnerCommand(parsedOwnerCommand.command, parsedOwnerCommand.args, replyJid, senderJid);
           if (response) {
             await sock.sendMessage(replyJid, { text: response });
