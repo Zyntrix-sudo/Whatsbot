@@ -3,7 +3,7 @@ services:
     name: whatsapp-ai-bot
     env: node
     buildCommand: cd whatsapp-ai-bot && npm install
-    startCommand: cd whatsapp-ai-bot && npm start
+    startCommand: cd whatsapp-ai-bot && node index.js
     autoDeploy: true
     healthCheckPath: /health
     envVars:
