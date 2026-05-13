@@ -1,7 +1,11 @@
 services:
-  - type: web
+  - type: worker
     name: whatsapp-ai-bot
     env: node
     buildCommand: npm install
     startCommand: npm start
     autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production

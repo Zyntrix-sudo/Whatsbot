@@ -248,8 +248,16 @@ function isOwner(jid) {
 }
 
 function isCommand(text) {
-  const value = text.trim().toLowerCase();
-  return value === BOT_INFO.commandPrefix || value.startsWith(`${BOT_INFO.commandPrefix} `);
+  const value = text.trim();
+  if (!value.toLowerCase().startsWith(`${BOT_INFO.commandPrefix} `)) {
+    return false;
+  }
+
+  const afterPrefix = value.slice(BOT_INFO.commandPrefix.length + 1).trim().toLowerCase();
+  const firstWord = afterPrefix.split(/\s+/)[0];
+
+  // Check if the first word after "rest" is a valid command
+  return OWNER_COMMANDS.has(firstWord) || firstWord === 'run';
 }
 
 function extractUrl(text) {
@@ -883,6 +891,9 @@ async function connectToWhatsApp() {
     console.log(`Message from ${senderJid} in ${replyJid}: ${text}`);
 
     try {
+      // Check if message starts with "rest" prefix
+      const startsWithRest = /^rest\b/i.test(text.trim());
+
       if (isCommand(text)) {
         if (!isOwner(senderJid)) {
           return;
@@ -897,12 +908,17 @@ async function connectToWhatsApp() {
         }
       }
 
+      // Allow AI conversation for everyone if message starts with "rest", or only for owner if no prefix
+      if (!startsWithRest && !isOwner(senderJid)) {
+        return;
+      }
+
       if (BOT_STATE.paused && !isOwner(senderJid)) {
         return;
       }
 
       const userData = getUserData(senderJid);
-      const aiInputText = isOwner(senderJid) ? stripOwnerPrefix(text) || text : text;
+      const aiInputText = stripOwnerPrefix(text) || text;
 
       userData.name = extractNameFromMessage(aiInputText, userData.name);
 
