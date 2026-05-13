@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "start": "cd whatsapp-ai-bot && npm start"
+  },
   "dependencies": {
     "dotenv": "^17.4.2"
   }
