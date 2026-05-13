@@ -1233,8 +1233,11 @@ async function connectToWhatsApp() {
         }
       }
 
-      // Allow AI conversation for everyone if message starts with "rest", or only for owner if no prefix
-      if (!startsWithRest && !isOwner(senderJid)) {
+      // In private chats, answer people directly.
+      // In groups, keep the stricter "rest ..." trigger unless this is an owner command.
+      const allowAiConversation = !isGroup || startsWithRest || isOwner(senderJid);
+
+      if (!allowAiConversation) {
         return;
       }
 
