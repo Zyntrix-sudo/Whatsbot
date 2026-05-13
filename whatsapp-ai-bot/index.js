@@ -1,5 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
+const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -33,7 +35,66 @@ const CONFIG = {
   usersDb: path.join(__dirname, 'users.json'),
   geminiApi: 'https://apis.davidcyril.name.ng/ai/gemini',
   fluxApi: 'https://apis.davidcyril.name.ng/fluxv2',
+  port: process.env.PORT || 3000,
 };
+
+// Web server for QR code display
+const app = express();
+let currentQR = null;
+
+app.get('/', (req, res) => {
+  if (currentQR) {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Rest AI - WhatsApp QR Code</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #25D366; }
+            img { max-width: 100%; height: auto; }
+            p { color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🔗 Rest AI WhatsApp Bot</h1>
+            <p>Scan this QR code with WhatsApp on your phone to authenticate the bot:</p>
+            <img src="${currentQR}" alt="QR Code" />
+            <p><strong>Make sure to scan within 60 seconds!</strong></p>
+            <p>After scanning, refresh this page to check connection status.</p>
+          </div>
+        </body>
+      </html>
+    `);
+  } else {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Rest AI - Connected</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #25D366; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>✅ Rest AI Bot Connected!</h1>
+            <p>The bot is now connected to WhatsApp and ready to receive messages.</p>
+          </div>
+        </body>
+      </html>
+    `);
+  }
+});
+
+app.listen(CONFIG.port, () => {
+  console.log(`🌐 Web server running on port ${CONFIG.port}`);
+  console.log(`🔗 Access QR code at: http://localhost:${CONFIG.port}`);
+});
 
 const BOT_INFO = {
   name: 'Rest AI',
@@ -750,11 +811,22 @@ async function connectToWhatsApp() {
     qrTimeout: 60000,
   });
 
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('\n🔗 Scan this QR code with WhatsApp on your phone:\n');
+      console.log('\n🔗 QR code generated! Access it at the web interface.\n');
+      console.log(`🌐 Web server: http://localhost:${CONFIG.port}`);
+
+      // Generate QR code as data URL for web display
+      try {
+        currentQR = await QRCode.toDataURL(qr);
+        console.log('✅ QR code image generated for web display');
+      } catch (error) {
+        console.error('❌ Failed to generate QR code image:', error);
+      }
+
+      // Also show terminal QR for local development
       qrcode.generate(qr, { small: true });
       console.log('\n📱 Make sure to scan the QR code within 60 seconds!\n');
     }
@@ -766,6 +838,7 @@ async function connectToWhatsApp() {
     if (connection === 'open') {
       console.log('✅ Successfully connected to WhatsApp!');
       console.log('🤖 Rest AI Bot is now online and ready to receive messages.');
+      currentQR = null; // Clear QR code once connected
     }
 
     if (connection === 'close') {
