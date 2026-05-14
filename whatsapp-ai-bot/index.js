@@ -117,6 +117,7 @@ const BOT_INFO = {
   developer: 'Emmanuel Restoration Abimbola',
   version: '1.0.0',
   commandPrefix: '.',
+  menuImage: 'https://i.postimg.cc/zGXYBh89/Miles-morales.jpg',
 };
 
 const COMMAND_ALIASES = {
@@ -1279,9 +1280,6 @@ async function handleOwnerCommand(command, args, replyJid, senderJid) {
   const rawArgs = args.join(' ').trim();
 
   switch (command) {
-    case 'help':
-      return buildHelpMenu();
-
     case 'owner':
       return [
         `*${BOT_INFO.name} Owner*`,
@@ -1549,6 +1547,13 @@ async function handleOwnerCommand(command, args, replyJid, senderJid) {
   }
 }
 
+async function sendHelpMenu(replyJid) {
+  await sendTrackedMessage(replyJid, {
+    image: { url: BOT_INFO.menuImage },
+    caption: buildHelpMenu(),
+  });
+}
+
 function buildHelpMenu() {
   const now = new Date();
   const dateText = new Intl.DateTimeFormat('en-NG', {
@@ -1692,6 +1697,11 @@ async function connectToWhatsApp() {
 
     try {
       if (ownerCommand) {
+        if (parsedCommand.command === 'help') {
+          await sendHelpMenu(replyJid);
+          return;
+        }
+
         if (parsedCommand.command === 'gcstatus') {
           if (!isGroup) {
             await sendTrackedMessage(replyJid, { text: 'Group only command.' });
