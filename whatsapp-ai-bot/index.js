@@ -41,7 +41,7 @@ const CONFIG = {
   ownerNumber: process.env.OWNER_NUMBER || '2349031646071@s.whatsapp.net',
   authDir: path.join(__dirname, 'auth_info_multi'),
   usersDb: path.join(__dirname, 'users.json'),
-  geminiApi: 'https://apis.davidcyril.name.ng/ai/gemini',
+  metaAiApi: 'https://apis.davidcyril.name.ng/ai/metaai',
   fluxApi: 'https://apis.davidcyril.name.ng/fluxv2',
   port: process.env.PORT || 3000,
 };
@@ -809,14 +809,11 @@ function normalizeAiReply(data) {
 
 async function getAiReply(prompt) {
   try {
-    const response = await fetchJson(CONFIG.geminiApi, {
-      prompt: prompt,
-      model: 'gemini-pro',
-    });
+    const response = await fetchJson(CONFIG.metaAiApi, { text: prompt });
 
     return normalizeAiReply(response);
   } catch (error) {
-    console.error('AI API error:', error.message);
+    console.error('Meta AI API error:', error.message);
     return null;
   }
 }
@@ -1876,7 +1873,7 @@ console.log(`Developer: ${BOT_INFO.developer}`);
 console.log(`Bot number: ${CONFIG.botNumber}`);
 console.log(`Owner number: ${CONFIG.ownerNumber}`);
 console.log(`Command prefix: ${BOT_INFO.commandPrefix}`);
-console.log('AI provider: David Cyril Gemini endpoint');
+console.log('AI provider: David Cyril Meta AI endpoint');
 console.log('Image provider: David Cyril Flux V2 endpoint');
 
 connectToWhatsApp().catch((error) => {
