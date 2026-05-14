@@ -99,6 +99,14 @@ app.get('/', (req, res) => {
   }
 });
 
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    bot: BOT_INFO?.name || 'Rest AI',
+    paused: BOT_STATE?.paused || false,
+  });
+});
+
 app.listen(CONFIG.port, () => {
   console.log(`🌐 Web server running on port ${CONFIG.port}`);
   console.log(`🔗 Access QR code at: http://localhost:${CONFIG.port}`);
@@ -108,7 +116,7 @@ const BOT_INFO = {
   name: 'Rest AI',
   developer: 'Emmanuel Restoration Abimbola',
   version: '1.0.0',
-  commandPrefix: 'rest',
+  commandPrefix: '.',
 };
 
 const COMMAND_ALIASES = {
@@ -130,6 +138,20 @@ const COMMAND_ALIASES = {
   swgc: 'gcstatus',
   upswgc: 'gcstatus',
   vv: 'vv',
+  ttt: 'tictactoe',
+  resume: 'resume',
+  stats: 'status',
+  info: 'status',
+  pfx: 'prefix',
+  id: 'jid',
+  choose: 'pick',
+  roll: 'dice',
+  cf: 'coinflip',
+  flip: 'coinflip',
+  coin: 'coinflip',
+  ball: '8ball',
+  eightball: '8ball',
+  math: 'calc',
 };
 
 const OWNER_COMMANDS = new Set([
@@ -139,6 +161,9 @@ const OWNER_COMMANDS = new Set([
   'alive',
   'uptime',
   'pause',
+  'resume',
+  'status',
+  'prefix',
   'ask',
   'game',
   'tiktok',
@@ -152,16 +177,99 @@ const OWNER_COMMANDS = new Set([
   'imagine',
   'gcstatus',
   'vv',
+  'echo',
+  'reverse',
+  'upper',
+  'lower',
+  'count',
+  'calc',
+  'date',
+  'time',
+  'jid',
+  'pick',
+  'dice',
+  'coinflip',
+  '8ball',
+  'quote',
+  'fact',
+  'joke',
+  'compliment',
+  'weather',
 ]);
 
 const BOT_STATE = {
   paused: false,
   startTime: Date.now(),
+  sentMessageIds: [],
 };
+
+const QUICK_QUOTES = [
+  'Discipline beats motivation when the mood no show.',
+  'Small small progress still na progress.',
+  'Rest if you need am, but no stop the work forever.',
+  'Clarity first, speed next.',
+  'No let fear do project manager for your life.',
+];
+
+const QUICK_FACTS = [
+  'Octopuses get three hearts.',
+  'Honey fit last for years without spoiling.',
+  'Bananas are berries, but strawberries no be berries by botany rules.',
+  'Your brain uses around 20 percent of your body energy.',
+  'Sharks don dey older than trees for earth history.',
+];
+
+const QUICK_JOKES = [
+  'Why developer carry ladder? Because the bug report talk say issue dey high priority.',
+  'I tell my code make e rest small. E reply say: syntax never sleep.',
+  'Why the bot calm down? E finally catch the missing semicolon.',
+  'I ask the server how body. E say: 200 OK.',
+  'Why the function break up? Too many unresolved arguments.',
+];
+
+const QUICK_COMPLIMENTS = [
+  'You sharp well well today.',
+  'Your brain dey fire correctly.',
+  'Clean thinking dey show for the way you ask questions.',
+  'You get strong builder energy today.',
+  'You sabi push work forward, no cap.',
+];
+
+const EIGHT_BALL_ANSWERS = [
+  'Yes, run am.',
+  'No be bad idea at all.',
+  'Signs point to yes.',
+  'Later go clear pass now.',
+  'No rush am yet.',
+  'My answer na no for now.',
+  'Ask me again when network no dey moody.',
+  'E fit work, but verify am.',
+];
 
 const BOT_PHONE = CONFIG.botNumber.replace('@s.whatsapp.net', '');
 
 let sock;
+
+function rememberSentMessage(messageId) {
+  if (!messageId) return;
+  BOT_STATE.sentMessageIds.push(messageId);
+  if (BOT_STATE.sentMessageIds.length > 200) {
+    BOT_STATE.sentMessageIds.shift();
+  }
+}
+
+function consumeSentMessage(messageId) {
+  const index = BOT_STATE.sentMessageIds.indexOf(messageId);
+  if (index === -1) return false;
+  BOT_STATE.sentMessageIds.splice(index, 1);
+  return true;
+}
+
+async function sendTrackedMessage(jid, payload, options) {
+  const sent = await sock.sendMessage(jid, payload, options);
+  rememberSentMessage(sent?.key?.id);
+  return sent;
+}
 
 const silentLogger = {
   level: 'silent',
@@ -280,8 +388,8 @@ function isOwner(jid) {
   return jidDigits.includes(ownerDigits) || ownerDigits.includes(jidDigits);
 }
 
-function isCommand(text) {
-  return Boolean(getCommandPrefix(text) && parseCommand(text).command);
+function isCommand(text, options = {}) {
+  return Boolean(parseCommand(text, options).command);
 }
 
 function extractUrl(text) {
@@ -301,8 +409,14 @@ function inferDownloadCommand(url) {
   return 'download';
 }
 
-function parseCommand(text) {
-  const rawText = stripOwnerPrefix(text);
+function parseCommand(text, options = {}) {
+  const allowBare = Boolean(options.allowBare);
+  const prefix = getCommandPrefix(text);
+  if (!prefix && !allowBare) {
+    return { command: null, args: [] };
+  }
+
+  const rawText = stripCommandPrefix(text, prefix);
   const cleanText = rawText.toLowerCase();
   const words = cleanText.split(/\s+/).filter(Boolean);
   if (!words.length) return { command: null, args: [] };
@@ -359,16 +473,11 @@ function parseCommand(text) {
   return { command: null, args: [] };
 }
 
-function stripOwnerPrefix(text) {
-  const value = text.trim();
-  if (/^\./.test(value)) {
+function stripCommandPrefix(text, prefix = getCommandPrefix(text)) {
+  const value = String(text || '').trim();
+  if (prefix === '.') {
     return value.slice(1).trim();
   }
-
-  if (/^rest\b/i.test(value)) {
-    return value.replace(/^rest\b\s*/i, '').trim();
-  }
-
   return value;
 }
 
@@ -398,7 +507,6 @@ function getCommandPrefix(text) {
   if (!value) return null;
 
   if (value.startsWith('.')) return '.';
-  if (/^rest\b/i.test(value)) return 'rest';
   return null;
 }
 
@@ -785,6 +893,120 @@ function getTicTacToeWinner(board) {
   return null;
 }
 
+function renderTicTacToeBoard(board) {
+  const labels = '  A   B   C';
+  return board
+    .map((row, index) => `${index + 1} ${row.map((cell) => (cell === ' ' ? ' ' : cell)).join(' | ')}`)
+    .reduce((text, row, index) => `${text}${index ? '\n---+---+---\n' : '\n'}${row}`, labels);
+}
+
+function normalizeTicTacToeMove(args) {
+  const joined = args.join(' ').trim().toLowerCase();
+  if (!joined) return null;
+
+  const compact = joined.replace(/\s+/g, '');
+  const alphaNumeric = compact.match(/^([abc])([123])$/i);
+  if (alphaNumeric) {
+    return {
+      row: Number(alphaNumeric[2]) - 1,
+      col: alphaNumeric[1].toLowerCase().charCodeAt(0) - 97,
+    };
+  }
+
+  const numeric = joined.match(/^([123])\s+([123])$/);
+  if (numeric) {
+    return {
+      row: Number(numeric[1]) - 1,
+      col: Number(numeric[2]) - 1,
+    };
+  }
+
+  return null;
+}
+
+function getAvailableTicTacToeMoves(board) {
+  const moves = [];
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      if (board[row][col] === ' ') {
+        moves.push({ row, col });
+      }
+    }
+  }
+  return moves;
+}
+
+function cloneBoard(board) {
+  return board.map((row) => [...row]);
+}
+
+function pickAiMove(board) {
+  const aiMark = 'O';
+  const playerMark = 'X';
+  const availableMoves = getAvailableTicTacToeMoves(board);
+
+  for (const move of availableMoves) {
+    const testBoard = cloneBoard(board);
+    testBoard[move.row][move.col] = aiMark;
+    if (getTicTacToeWinner(testBoard) === aiMark) {
+      return move;
+    }
+  }
+
+  for (const move of availableMoves) {
+    const testBoard = cloneBoard(board);
+    testBoard[move.row][move.col] = playerMark;
+    if (getTicTacToeWinner(testBoard) === playerMark) {
+      return move;
+    }
+  }
+
+  return (
+    availableMoves.find((move) => move.row === 1 && move.col === 1) ||
+    availableMoves.find((move) => (move.row === 0 || move.row === 2) && (move.col === 0 || move.col === 2)) ||
+    availableMoves[0] ||
+    null
+  );
+}
+
+function formatTicTacToeCell(row, col) {
+  return `${String.fromCharCode(65 + col)}${row + 1}`;
+}
+
+function getRandomItem(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function formatWeather() {
+  const formatter = new Intl.DateTimeFormat('en-NG', {
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Africa/Lagos',
+  });
+
+  return `I no get live weather data inside this bot yet, but Lagos time now na ${formatter.format(new Date())}.`;
+}
+
+function calculateExpression(expression) {
+  const clean = expression.replace(/\s+/g, '');
+  if (!clean || !/^[0-9+\-*/%.()]+$/.test(clean)) {
+    return null;
+  }
+
+  try {
+    const value = Function(`"use strict"; return (${clean});`)();
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return null;
+    }
+
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 function buildMovieListMessage(query, movies) {
   const rows = movies.slice(0, 5).map((item, index) => ({
     title: `${item.show.name} (${item.show.premiered ? item.show.premiered.slice(0, 4) : 'N/A'})`,
@@ -823,12 +1045,12 @@ async function searchMovies(query) {
 async function sendMovieResults(replyJid, query) {
   const movies = await searchMovies(query);
   if (!movies.length) {
-    await sock.sendMessage(replyJid, { text: `No movie results found for "${query}". Try another title.` });
+    await sendTrackedMessage(replyJid, { text: `No movie results found for "${query}". Try another title.` });
     return;
   }
 
   const listMessage = buildMovieListMessage(query, movies);
-  await sock.sendMessage(replyJid, listMessage);
+  await sendTrackedMessage(replyJid, listMessage);
 }
 
 async function generateImage(prompt) {
@@ -1048,6 +1270,333 @@ function buildHelpMenu() {
   ].join('\n');
 }
 
+function handleAskCommandExamples(command) {
+  if (command === 'ai' || command === 'ask') {
+    return 'Send a question like `.ai who be your developer?`';
+  }
+
+  return `Use \`${BOT_INFO.commandPrefix}${command}\``;
+}
+
+async function handleOwnerCommand(command, args, replyJid, senderJid) {
+  const rawArgs = args.join(' ').trim();
+
+  switch (command) {
+    case 'help':
+      return buildHelpMenu();
+
+    case 'owner':
+      return [
+        `*${BOT_INFO.name} Owner*`,
+        `Owner number: ${CONFIG.ownerNumber.replace('@s.whatsapp.net', '')}`,
+        `Developer: ${BOT_INFO.developer}`,
+      ].join('\n');
+
+    case 'ping':
+      return 'Pong. I dey active and sharp sharp.';
+
+    case 'alive':
+      return `${BOT_INFO.name} dey online. No worry, I still dey work.`;
+
+    case 'uptime':
+      return `Uptime: ${formatUptime()}`;
+
+    case 'pause':
+      BOT_STATE.paused = true;
+      return 'Bot don pause. Normal users no go get reply until you use `.resume`.';
+
+    case 'resume':
+      BOT_STATE.paused = false;
+      return 'Bot don resume. I fit reply people again.';
+
+    case 'status':
+      return [
+        `*${BOT_INFO.name} Status*`,
+        `Paused: ${BOT_STATE.paused ? 'yes' : 'no'}`,
+        `Uptime: ${formatUptime()}`,
+        `Prefix: ${BOT_INFO.commandPrefix}`,
+      ].join('\n');
+
+    case 'prefix':
+      return `Command prefix don change to \`${BOT_INFO.commandPrefix}\` only. Example: \`.menu\``;
+
+    case 'game':
+      return 'Game menu: `.tictactoe`, `.dice`, `.coinflip`, `.8ball`.';
+
+    case 'tiktok':
+    case 'youtube':
+    case 'facebook':
+    case 'instagram': {
+      if (!rawArgs) {
+        return `Send the link like: \`.${command} https://example.com/...\``;
+      }
+
+      await sendTrackedMessage(replyJid, { text: `I dey fetch the download link now for ${command}...` });
+      const downloadUrl = await downloadMedia(rawArgs);
+      if (!downloadUrl) {
+        return `I no fit get download link for that ${command} link now. Make you try again or send another link.`;
+      }
+
+      return `Download link for your ${command} video:\n${downloadUrl}`;
+    }
+
+    case 'movie': {
+      if (!rawArgs) {
+        return 'Send movie search like: `.movie Spider-Man`';
+      }
+
+      await sendMovieResults(replyJid, rawArgs);
+      return null;
+    }
+
+    case 'tictactoe': {
+      const userData = getUserData(senderJid);
+      userData.ticTacToe = {
+        board: [
+          [' ', ' ', ' '],
+          [' ', ' ', ' '],
+          [' ', ' ', ' '],
+        ],
+        player: 'X',
+        ai: 'O',
+        status: 'playing',
+      };
+      saveUserData(senderJid, userData);
+
+      return [
+        'Tic-Tac-Toe don start.',
+        'You be X and you start first. AI be O.',
+        `Play with \`.move A1\` or \`.move 1 1\`.`,
+        '',
+        renderTicTacToeBoard(userData.ticTacToe.board),
+      ].join('\n');
+    }
+
+    case 'move': {
+      const move = normalizeTicTacToeMove(args);
+      if (!move) {
+        return 'Send your move like `.move A1` or `.move 2 3`.';
+      }
+
+      const userData = getUserData(senderJid);
+      const game = userData.ticTacToe;
+      if (!game || game.status !== 'playing') {
+        return 'No active Tic-Tac-Toe game. Start one with `.tictactoe`.';
+      }
+
+      if (game.board[move.row][move.col] !== ' ') {
+        return 'That position don full. Choose another square.';
+      }
+
+      game.board[move.row][move.col] = game.player;
+      let winner = getTicTacToeWinner(game.board);
+      if (winner === game.player) {
+        game.status = 'finished';
+        saveUserData(senderJid, userData);
+        return `You win this round.\n\n${renderTicTacToeBoard(game.board)}`;
+      }
+
+      if (winner === 'draw') {
+        game.status = 'draw';
+        saveUserData(senderJid, userData);
+        return `Draw game.\n\n${renderTicTacToeBoard(game.board)}`;
+      }
+
+      const aiMove = pickAiMove(game.board);
+      if (aiMove) {
+        game.board[aiMove.row][aiMove.col] = game.ai;
+      }
+
+      winner = getTicTacToeWinner(game.board);
+      if (winner === game.ai) {
+        game.status = 'finished';
+        saveUserData(senderJid, userData);
+        return [
+          `You play ${formatTicTacToeCell(move.row, move.col)}. AI answer with ${formatTicTacToeCell(aiMove.row, aiMove.col)}.`,
+          '',
+          renderTicTacToeBoard(game.board),
+          '',
+          'AI win this round.',
+        ].join('\n');
+      }
+
+      if (winner === 'draw') {
+        game.status = 'draw';
+        saveUserData(senderJid, userData);
+        return [
+          `You play ${formatTicTacToeCell(move.row, move.col)}. AI answer with ${formatTicTacToeCell(aiMove.row, aiMove.col)}.`,
+          '',
+          renderTicTacToeBoard(game.board),
+          '',
+          'Draw game.',
+        ].join('\n');
+      }
+
+      saveUserData(senderJid, userData);
+      return [
+        `You play ${formatTicTacToeCell(move.row, move.col)}. AI answer with ${formatTicTacToeCell(aiMove.row, aiMove.col)}.`,
+        '',
+        renderTicTacToeBoard(game.board),
+        '',
+        'Your turn again.',
+      ].join('\n');
+    }
+
+    case 'imagine': {
+      if (!rawArgs) {
+        return 'Send image prompt like: `.img a cyberpunk Lagos night market`';
+      }
+
+      await sendTrackedMessage(replyJid, { text: 'I dey generate the image now. Small time.' });
+      const imageUrl = await generateImage(rawArgs);
+
+      if (!imageUrl) {
+        return 'Image generation fail. Try another prompt.';
+      }
+
+      await sendTrackedMessage(replyJid, {
+        image: { url: imageUrl },
+        caption: `Generated image for: ${rawArgs}`,
+      });
+      return null;
+    }
+
+    case 'echo':
+      return rawArgs || 'Send text after `.echo`.';
+
+    case 'reverse':
+      return rawArgs ? rawArgs.split('').reverse().join('') : 'Send text after `.reverse`.';
+
+    case 'upper':
+      return rawArgs ? rawArgs.toUpperCase() : 'Send text after `.upper`.';
+
+    case 'lower':
+      return rawArgs ? rawArgs.toLowerCase() : 'Send text after `.lower`.';
+
+    case 'count':
+      if (!rawArgs) {
+        return 'Send text after `.count`.';
+      }
+      return `Chars: ${rawArgs.length}\nWords: ${rawArgs.split(/\s+/).filter(Boolean).length}`;
+
+    case 'calc': {
+      if (!rawArgs) {
+        return 'Send calculation like `.calc (12+8)*3`';
+      }
+      const value = calculateExpression(rawArgs);
+      return value === null ? 'I no fit solve that expression. Use only numbers and + - * / % ( ).' : `Answer: ${value}`;
+    }
+
+    case 'date':
+      return new Intl.DateTimeFormat('en-NG', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        timeZone: 'Africa/Lagos',
+      }).format(new Date());
+
+    case 'time':
+      return new Intl.DateTimeFormat('en-NG', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+        timeZone: 'Africa/Lagos',
+      }).format(new Date());
+
+    case 'jid':
+      return `Chat: ${replyJid}\nSender: ${senderJid}`;
+
+    case 'pick': {
+      if (!rawArgs) {
+        return 'Send options like `.pick rice, beans, yam`';
+      }
+      const choices = rawArgs.split(/[,|]/).map((item) => item.trim()).filter(Boolean);
+      const pool = choices.length ? choices : rawArgs.split(/\s+/).filter(Boolean);
+      return pool.length ? `I pick: ${getRandomItem(pool)}` : 'Give me options to pick from.';
+    }
+
+    case 'dice':
+      return `You roll: ${Math.floor(Math.random() * 6) + 1}`;
+
+    case 'coinflip':
+      return `Coin talk: ${Math.random() < 0.5 ? 'Heads' : 'Tails'}`;
+
+    case '8ball':
+      if (!rawArgs) {
+        return 'Ask question like `.8ball will this deploy work?`';
+      }
+      return getRandomItem(EIGHT_BALL_ANSWERS);
+
+    case 'quote':
+      return getRandomItem(QUICK_QUOTES);
+
+    case 'fact':
+      return getRandomItem(QUICK_FACTS);
+
+    case 'joke':
+      return getRandomItem(QUICK_JOKES);
+
+    case 'compliment':
+      return getRandomItem(QUICK_COMPLIMENTS);
+
+    case 'weather':
+      return formatWeather();
+
+    case 'vv':
+      return null;
+
+    default:
+      return `I no know that command. Use \`${BOT_INFO.commandPrefix}menu\`.`;
+  }
+}
+
+function buildHelpMenu() {
+  const now = new Date();
+  const dateText = new Intl.DateTimeFormat('en-NG', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'Africa/Lagos',
+  }).format(now);
+  const timeText = new Intl.DateTimeFormat('en-NG', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Africa/Lagos',
+  }).format(now);
+
+  return [
+    `*${BOT_INFO.name} Menu*`,
+    `Date: ${dateText}`,
+    `Time: ${timeText}`,
+    `Prefix: ${BOT_INFO.commandPrefix}`,
+    `Commands: ${OWNER_COMMANDS.size}+`,
+    '',
+    'Core',
+    '.menu, .owner, .ping, .alive, .uptime, .status, .pause, .resume, .prefix',
+    '',
+    'AI and Media',
+    '.ai [question], .img [prompt], .vv, .gcstatus [text]',
+    '',
+    'Downloads',
+    '.youtube, .facebook, .instagram, .tiktok, .movie',
+    '',
+    'Games',
+    '.tictactoe, .move A1, .dice, .coinflip, .8ball [question]',
+    '',
+    'Utilities',
+    '.echo, .reverse, .upper, .lower, .count, .calc, .date, .time, .jid, .pick',
+    '',
+    'Fun',
+    '.quote, .fact, .joke, .compliment, .weather',
+    '',
+    'Owner self DM shortcut',
+    'Inside your own DM, you can type commands without the dot. Example: `menu`, `ping`, `tictactoe`.',
+  ].join('\n');
+}
+
 async function connectToWhatsApp() {
   if (!fs.existsSync(CONFIG.authDir)) {
     fs.mkdirSync(CONFIG.authDir, { recursive: true });
@@ -1117,15 +1666,24 @@ async function connectToWhatsApp() {
     const text = getMessageText(msg.message);
     const isGroup = remoteJid?.endsWith('@g.us');
     const senderJid = getSenderId(msg, isGroup, remoteJid);
-    const parsedOwnerCommand = isCommand(text) ? parseCommand(text) : { command: null, args: [] };
-    const ownerCommand =
-      isOwner(senderJid) &&
-      parsedOwnerCommand.command &&
-      OWNER_COMMANDS.has(parsedOwnerCommand.command);
 
     if (!remoteJid || !text) return;
     if (remoteJid === 'status@broadcast') return;
-    if (msg.key.fromMe && !ownerCommand) return;
+
+    if (msg.key.fromMe && consumeSentMessage(msg.key.id)) {
+      return;
+    }
+
+    const isOwnerSelfDm = !isGroup && normalizeJid(remoteJid) === normalizeJid(CONFIG.ownerNumber) && isOwner(senderJid);
+    const hasCommandPrefix = Boolean(getCommandPrefix(text));
+    const parsedCommand = parseCommand(text, { allowBare: isOwnerSelfDm });
+    const ownerCommand =
+      isOwner(senderJid) &&
+      parsedCommand.command &&
+      OWNER_COMMANDS.has(parsedCommand.command) &&
+      (hasCommandPrefix || isOwnerSelfDm);
+
+    if (msg.key.fromMe && !isOwnerSelfDm && !ownerCommand) return;
 
     if (isGroup && !ownerCommand && !shouldReplyInGroup(msg, text)) {
       return;
@@ -1136,106 +1694,95 @@ async function connectToWhatsApp() {
     console.log(`Message from ${senderJid} in ${replyJid}: ${text}`);
 
     try {
-      const commandPrefix = getCommandPrefix(text);
-      const startsWithRest = commandPrefix === 'rest';
+      if (ownerCommand) {
+        if (parsedCommand.command === 'gcstatus') {
+          if (!isGroup) {
+            await sendTrackedMessage(replyJid, { text: 'Group only command.' });
+            return;
+          }
 
-      if (isCommand(text)) {
-        if (!isOwner(senderJid)) {
+          const isAdmin = await isGroupAdmin(replyJid, senderJid);
+          if (!isAdmin) {
+            await sendTrackedMessage(replyJid, { text: 'Admin only command.' });
+            return;
+          }
+
+          const caption = parsedCommand.args.join(' ').trim();
+          const result = await sendGroupStatusMessage(replyJid, msg, caption);
+          if (result) {
+            await sendTrackedMessage(replyJid, { text: result });
+            return;
+          }
+
+          await sendTrackedMessage(replyJid, { text: 'Group status sent.' });
           return;
         }
 
-        if (ownerCommand) {
-          if (parsedOwnerCommand.command === 'gcstatus') {
-            if (!isGroup) {
-              await sock.sendMessage(replyJid, { text: 'Group only command.' });
-              return;
-            }
-
-            const isAdmin = await isGroupAdmin(replyJid, senderJid);
-            if (!isAdmin) {
-              await sock.sendMessage(replyJid, { text: 'Admin only command.' });
-              return;
-            }
-
-            const caption = parsedOwnerCommand.args.join(' ').trim();
-            const result = await sendGroupStatusMessage(replyJid, msg, caption);
-            if (result) {
-              await sock.sendMessage(replyJid, { text: result });
-              return;
-            }
-
-            await sock.sendMessage(replyJid, { text: 'Group status sent.' });
+        if (parsedCommand.command === 'vv') {
+          const quotedMessage = getQuotedMessage(msg);
+          if (!quotedMessage) {
+            await sendTrackedMessage(replyJid, { text: 'Reply to a view-once image, video, or audio with `.vv`.' });
             return;
           }
 
-          if (parsedOwnerCommand.command === 'vv') {
-            const quotedMessage = getQuotedMessage(msg);
-            if (!quotedMessage) {
-              await sock.sendMessage(replyJid, { text: 'Reply to a view-once image, video, or audio with `.vv` or `rest vv`.' });
-              return;
-            }
-
-            const media = getQuotedMedia(quotedMessage);
-            if (!media) {
-              await sock.sendMessage(replyJid, { text: 'No supported media found in that quoted message.' });
-              return;
-            }
-
-            await sock.sendMessage(replyJid, { text: `I dey extract the ${media.kind} now...` });
-            const buffer = await downloadQuotedMediaBuffer(media.kind, media.payload);
-            const sendPayload = {
-              ...media.sendOptions,
-              [media.kind]: buffer,
-            };
-            await sock.sendMessage(replyJid, sendPayload);
+          const media = getQuotedMedia(quotedMessage);
+          if (!media) {
+            await sendTrackedMessage(replyJid, { text: 'No supported media found in that quoted message.' });
             return;
           }
 
-          if (parsedOwnerCommand.command === 'ask') {
-            const promptText = parsedOwnerCommand.args.join(' ').trim();
-            if (!promptText) {
-              await sock.sendMessage(replyJid, { text: 'Send a question like `.ai who be your developer?`' });
-              return;
-            }
-
-            const userData = getUserData(senderJid);
-            userData.name = extractNameFromMessage(promptText, userData.name);
-            userData.conversationHistory.push({
-              role: 'user',
-              content: promptText,
-            });
-            userData.conversationHistory = truncateHistory(userData.conversationHistory, 20);
-            saveUserData(senderJid, userData);
-
-            await sock.sendPresenceUpdate('composing', replyJid);
-            const prompt = buildAiPrompt(userData, promptText, isGroup);
-            const aiReply = await getAiReply(prompt);
-            const finalReply = aiReply || 'The AI no answer me just now. Try again small.';
-
-            userData.conversationHistory.push({
-              role: 'assistant',
-              content: finalReply,
-            });
-            userData.conversationHistory = truncateHistory(userData.conversationHistory, 20);
-            userData.firstTime = false;
-            saveUserData(senderJid, userData);
-
-            await sock.sendMessage(replyJid, { text: finalReply });
-            await sock.sendPresenceUpdate('available', replyJid);
-            return;
-          }
-
-          const response = await handleOwnerCommand(parsedOwnerCommand.command, parsedOwnerCommand.args, replyJid, senderJid);
-          if (response) {
-            await sock.sendMessage(replyJid, { text: response });
-          }
+          await sendTrackedMessage(replyJid, { text: `I dey extract the ${media.kind} now...` });
+          const buffer = await downloadQuotedMediaBuffer(media.kind, media.payload);
+          const sendPayload = {
+            ...media.sendOptions,
+            [media.kind]: buffer,
+          };
+          await sendTrackedMessage(replyJid, sendPayload);
           return;
         }
+
+        if (parsedCommand.command === 'ask') {
+          const promptText = parsedCommand.args.join(' ').trim();
+          if (!promptText) {
+            await sendTrackedMessage(replyJid, { text: handleAskCommandExamples('ask') });
+            return;
+          }
+
+          const userData = getUserData(senderJid);
+          userData.name = extractNameFromMessage(promptText, userData.name);
+          userData.conversationHistory.push({
+            role: 'user',
+            content: promptText,
+          });
+          userData.conversationHistory = truncateHistory(userData.conversationHistory, 20);
+          saveUserData(senderJid, userData);
+
+          await sock.sendPresenceUpdate('composing', replyJid);
+          const prompt = buildAiPrompt(userData, promptText, isGroup);
+          const aiReply = await getAiReply(prompt);
+          const finalReply = aiReply || 'The AI no answer me just now. Try again small.';
+
+          userData.conversationHistory.push({
+            role: 'assistant',
+            content: finalReply,
+          });
+          userData.conversationHistory = truncateHistory(userData.conversationHistory, 20);
+          userData.firstTime = false;
+          saveUserData(senderJid, userData);
+
+          await sendTrackedMessage(replyJid, { text: finalReply });
+          await sock.sendPresenceUpdate('available', replyJid);
+          return;
+        }
+
+        const response = await handleOwnerCommand(parsedCommand.command, parsedCommand.args, replyJid, senderJid);
+        if (response) {
+          await sendTrackedMessage(replyJid, { text: response });
+        }
+        return;
       }
 
-      // In private chats, answer people directly.
-      // In groups, keep the stricter "rest ..." trigger unless this is an owner command.
-      const allowAiConversation = !isGroup || startsWithRest || isOwner(senderJid);
+      const allowAiConversation = !isGroup || hasCommandPrefix;
 
       if (!allowAiConversation) {
         return;
@@ -1246,7 +1793,7 @@ async function connectToWhatsApp() {
       }
 
       const userData = getUserData(senderJid);
-      const aiInputText = stripOwnerPrefix(text) || text;
+      const aiInputText = stripCommandPrefix(text) || text;
 
       userData.name = extractNameFromMessage(aiInputText, userData.name);
 
@@ -1262,7 +1809,7 @@ async function connectToWhatsApp() {
       if (isImagePrompt(aiInputText)) {
         const prompt = extractImagePrompt(aiInputText);
         if (!prompt) {
-          await sock.sendMessage(replyJid, {
+          await sendTrackedMessage(replyJid, {
             text: 'Tell me wetin you want make I generate. Example: generate image of a red Ferrari for Lagos street.',
           });
           await sock.sendPresenceUpdate('available', replyJid);
@@ -1271,12 +1818,12 @@ async function connectToWhatsApp() {
 
         const imageUrl = await generateImage(prompt);
         if (imageUrl) {
-          await sock.sendMessage(replyJid, {
+          await sendTrackedMessage(replyJid, {
             image: { url: imageUrl },
             caption: `Oya, your image don land.\nPrompt: ${prompt}`,
           });
         } else {
-          await sock.sendMessage(replyJid, {
+          await sendTrackedMessage(replyJid, {
             text: 'I try generate the image but e no work. Try another prompt small.',
           });
         }
@@ -1309,12 +1856,12 @@ async function connectToWhatsApp() {
       userData.firstTime = false;
       saveUserData(senderJid, userData);
 
-      await sock.sendMessage(replyJid, { text: finalReply });
+      await sendTrackedMessage(replyJid, { text: finalReply });
       await sock.sendPresenceUpdate('available', replyJid);
     } catch (error) {
       console.error('Message handler error:', error.message);
       try {
-        await sock.sendMessage(replyJid, {
+        await sendTrackedMessage(replyJid, {
           text: 'Something break small for my side. Try again in a bit.',
         });
       } catch (sendError) {

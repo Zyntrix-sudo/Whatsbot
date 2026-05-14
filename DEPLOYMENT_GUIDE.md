@@ -1,75 +1,54 @@
-# WhatsApp AI Bot - Deployment Guide for Render.com
+# Railway Deployment Guide
 
-## Overview
-This guide will help you deploy your WhatsApp AI Bot to Render.com so it runs 24/7 even when your PC is off.
+This project is now set up for Railway instead of Render.
 
-## Prerequisites
-1. GitHub account (your code is already pushed)
-2. Render.com account (free tier available)
-3. Your WhatsApp bot credentials configured
+## What changed
 
-## Deployment Steps
+- Root `package.json` now starts the bot with `npm start`
+- `railway.json` config was added for Railway deploy settings
+- `/health` endpoint was added for Railway health checks
+- Old `Render.yaml` was removed
 
-### 1. Push Code to GitHub
-If you haven't already pushed your code:
+## Deploy on Railway
+
+1. Push this repository to GitHub.
+2. Create a new Railway project.
+3. Choose "Deploy from GitHub repo".
+4. Select this repository.
+5. Railway should detect the Node app and run `npm start`.
+
+## Railway settings
+
+- Start command: `npm start`
+- Healthcheck path: `/health`
+- Port: Railway injects `PORT` automatically, and the bot already uses it
+
+## Required environment variables
+
+- `BOT_NUMBER`
+- `OWNER_NUMBER`
+- `PORT` is provided by Railway
+
+If you keep extra secrets in `whatsapp-ai-bot/.env` locally, add the same values in Railway Variables.
+
+## Important note about WhatsApp auth
+
+This bot stores session files in `whatsapp-ai-bot/auth_info_multi`.
+If Railway redeploys or the service storage resets, you may need to scan the QR code again unless you attach persistent storage.
+
+## First deploy check
+
+After deploy:
+
+1. Open the Railway logs.
+2. Wait for the QR code link or connection log.
+3. Visit your generated app URL to view the QR page if needed.
+4. Scan the QR code with WhatsApp.
+
+## Useful local commands
+
 ```bash
-git remote add origin https://github.com/yourusername/whatsapp-ai-bot.git
-git branch -M main
-git push -u origin main
+npm install
+npm run check
+npm start
 ```
-
-### 2. Create Render.com Service
-1. Go to [Render.com](https://render.com) and sign in
-2. Click "New" → "Web Service"
-3. Connect your GitHub repository
-4. Configure the service:
-   - **Name**: whatsapp-ai-bot
-   - **Region**: Choose closest to your users
-   - **Branch**: main
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
-   - **Environment**: Node.js
-
-### 3. Configure Environment Variables
-In your Render.com service dashboard:
-1. Go to "Environment" tab
-2. Add these variables (get values from your `.env` file):
-   - `BOT_NUMBER`: Your WhatsApp number with country code
-   - `OPENAI_API_KEY`: Your OpenAI API key
-   - Any other variables from your `.env` file
-
-### 4. Important Considerations for WhatsApp Bots
-- **Persistent Connection**: Render.com web services maintain persistent connections, suitable for WhatsApp bots
-- **QR Code Handling**: On first deploy, check logs for QR code to scan with WhatsApp
-- **Session Storage**: The bot uses `auth_info_multi/` folder for session persistence. Render's free tier has ephemeral filesystem, so sessions may reset on redeploy. Consider:
-  - Using external database for session storage (advanced)
-  - Accepting occasional re-scan of QR code
-  - Upgrading to Render's paid tier for persistent disk
-
-### 5. Monitor and Maintain
-- Check logs regularly for connection issues
-- WhatsApp connections may need occasional refreshing
-- Monitor usage to stay within free tier limits
-
-## Troubleshooting
-- **Connection Issues**: Check logs for Baileys connection errors
-- **QR Code Not Showing**: Ensure you're checking logs immediately after deploy
-- **Environment Variables**: Double-check all required variables are set
-
-## Free Tier Limitations
-- Render free tier: 750 hours/month (enough for 24/7 operation)
-- Automatic sleep after 15 minutes of inactivity (may affect instant response)
-- Consider upgrading if you need guaranteed uptime
-
-## Alternative: Keep-alive Service
-To prevent sleeping, you can set up a simple ping service:
-1. Create a `/health` endpoint in your bot that returns 200 OK
-2. Use a free service like UptimeRobot to ping your bot every 10-14 minutes
-
-## Next Steps
-1. Deploy following these steps
-2. Test thoroughly
-3. Monitor for first 24 hours
-4. Adjust as needed
-
-Your WhatsApp AI Bot should now run continuously on Render.com!

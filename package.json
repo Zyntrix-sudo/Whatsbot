@@ -4,7 +4,11 @@
   "description": "Render deployment wrapper for whatsapp-ai-bot",
   "main": "whatsapp-ai-bot/index.js",
   "scripts": {
-    "start": "cd whatsapp-ai-bot && node index.js"
+    "start": "node whatsapp-ai-bot/index.js",
+    "check": "node --check whatsapp-ai-bot/index.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "type": "commonjs",
   "dependencies": {
