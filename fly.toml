@@ -26,9 +26,9 @@ primary_region = "iad"
   destination = "/app/auth_info_multi"
 
 [[mounts]]
-  source = "users.json"
+  source = "users_json"
   destination = "/app/users.json"
 
 [[mounts]]
-  source = ".env"
+  source = "_env"
   destination = "/app/.env"
