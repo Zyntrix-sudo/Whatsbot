@@ -1,27 +1,24 @@
-app = "whatsapp-ai-bot"
+# fly.toml app configuration file generated for whatsbot-uksosq on 2026-05-14T21:01:40Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-primary_region = "iad"
+app = 'whatsbot-uksosq'
+primary_region = 'ams'
 
 [build]
-  dockerfile = "Dockerfile"
-
-[env]
-  # Add any environment variables here
-  # For example:
-  # BOT_NUMBER = "your-number@s.whatsapp.net"
-  # OWNER_NUMBER = "your-number@s.whatsapp.net"
-
-[http_service]
-  internal_port = 3000
-  force_https = true
-  [[http_service.ports]]
-    port = 80
-    handlers = ["http"]
-  [[http_service.ports]]
-    port = 443
-    handlers = ["tls", "http"]
+  dockerfile = 'Dockerfile'
 
 [[mounts]]
-  source = "auth_info_multi"
-  destination = "/app/auth_info_multi"
+  source = 'auth_info_multi'
+  destination = '/app/auth_info_multi'
 
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 256
