@@ -1,12 +1,12 @@
 # WhatsApp AI Bot 🤖
 
-A ChatGPT-powered WhatsApp bot that responds with **friendly pidgin/English mix**. The bot remembers user names, stores conversation history, and prevents bot loops.
+A ChatGPT-powered WhatsApp bot designed to respond like a polished business assistant in **US English**, while still adapting naturally to users who start in pidgin or other informal styles. The bot remembers user names, stores conversation history, and prevents bot loops.
 
 ## ✨ Features
 
 - 🤖 ChatGPT integration with conversation memory
-- 💬 Speaks pidgin English + regular English naturally
-- 👋 Remembers user names and greets them when they return
+- 💬 Speaks professional American English and adapts to pidgin when needed
+- 👋 Remembers user names and greets returning users politely
 - 📝 Stores full conversation history per user
 - 🔄 Auto-reconnection on disconnect
 - 🔒 Secure QR code authentication
