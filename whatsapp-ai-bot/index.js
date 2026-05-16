@@ -50,57 +50,150 @@ const CONFIG = {
   keepAliveUrl: process.env.KEEPALIVE_URL || `http://127.0.0.1:${process.env.PORT || 3000}/health`,
 };
 
-// Web server for QR code display
+// Web server for QR code display and professional landing pages
 const app = express();
 let currentQR = null;
 
+function generatePairingCode() {
+  const code = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return code;
+}
+
+function getWhatsAppConnectLinks(pairingCode) {
+  const botPhone = CONFIG.botNumber.replace('@s.whatsapp.net', '');
+  const text = encodeURIComponent(`PAIR ${pairingCode}`);
+  return {
+    whatsappUri: `whatsapp://send?phone=${botPhone}&text=${text}`,
+    waMeLink: `https://api.whatsapp.com/send?phone=${botPhone}&text=${text}`,
+  };
+}
+
 app.get('/', (req, res) => {
-  if (currentQR) {
-    res.send(`
+  res.send(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Rest AI - WhatsApp QR Code</title>
+          <title>Rest AI WhatsApp Bot</title>
           <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
-            .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            h1 { color: #25D366; }
-            img { max-width: 100%; height: auto; }
-            p { color: #666; }
+            body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #0f172a 0%, #111827 55%, #1f2937 100%); color: #f8fafc; }
+            .page { display: flex; min-height: 100vh; align-items: center; justify-content: center; padding: 24px; }
+            .card { width: min(980px, 100%); display: grid; grid-template-columns: 1.25fr 1fr; gap: 24px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 24px; box-shadow: 0 40px 120px rgba(15, 23, 42, 0.35); padding: 32px; }
+            .hero { display: flex; flex-direction: column; justify-content: center; gap: 18px; }
+            .hero h1 { margin: 0; font-size: clamp(2.4rem, 4vw, 4rem); line-height: 1.03; letter-spacing: -0.04em; }
+            .hero p { margin: 0; color: rgba(226, 232, 240, 0.88); line-height: 1.75; max-width: 40rem; }
+            .buttons { display: flex; flex-wrap: wrap; gap: 14px; }
+            .button { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 24px; border-radius: 14px; border: none; font-weight: 700; cursor: pointer; text-decoration: none; color: #fff; }
+            .button.primary { background: linear-gradient(135deg, #38bdf8, #22c55e); }
+            .button.secondary { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; }
+            .sidebar { display: flex; flex-direction: column; gap: 18px; justify-content: center; }
+            .badge { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; background: rgba(34, 197, 94, 0.12); color: #d1fae5; font-size: 0.95rem; }
+            .feature { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: 18px; background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.12); }
+            .feature strong { font-size: 0.95rem; color: #f8fafc; }
+            .feature span { color: rgba(226, 232, 240, 0.78); line-height: 1.65; }
+            .footer { color: rgba(226, 232, 240, 0.64); font-size: 0.95rem; }
+            @media (max-width: 860px) { .card { grid-template-columns: 1fr; } }
           </style>
         </head>
         <body>
-          <div class="container">
-            <h1>🔗 Rest AI WhatsApp Bot</h1>
-            <p>Scan this QR code with WhatsApp on your phone to authenticate the bot:</p>
-            <img src="${currentQR}" alt="QR Code" />
-            <p><strong>Make sure to scan within 60 seconds!</strong></p>
-            <p>After scanning, refresh this page to check connection status.</p>
+          <div class="page">
+            <div class="card">
+              <div class="hero">
+                <span class="badge">Professional WhatsApp AI Bot</span>
+                <h1>Rest AI connects your business to WhatsApp with modern reliability.</h1>
+                <p>Launch a polished onboarding flow, scan a QR code, or pair directly through WhatsApp. The bot is built for Render deployment and stays awake with automatic health checks.</p>
+                <div class="buttons">
+                  <a class="button primary" href="/connect">Connect to WhatsApp</a>
+                  <a class="button secondary" href="/health">Check Status</a>
+                </div>
+                <div class="footer">Deploy with Render and keep your bot live with automatic health pings and a modern connection experience.</div>
+              </div>
+              <div class="sidebar">
+                <div class="feature">
+                  <strong>Scan or pair</strong>
+                  <span>Open the prepared connection page and choose either QR scan or WhatsApp pairing code.</span>
+                </div>
+                <div class="feature">
+                  <strong>Business-grade UI</strong>
+                  <span>Professional landing experience to reassure users before entering WhatsApp.</span>
+                </div>
+                <div class="feature">
+                  <strong>Render-ready</strong>
+                  <span>Includes health endpoint and keepalive ping for stable Render hosting.</span>
+                </div>
+              </div>
+            </div>
           </div>
         </body>
       </html>
     `);
-  } else {
-    res.send(`
+});
+
+app.get('/connect', (req, res) => {
+  const pairingCode = generatePairingCode();
+  const { whatsappUri, waMeLink } = getWhatsAppConnectLinks(pairingCode);
+  const qrcodeHtml = currentQR
+    ? `<img src="${currentQR}" alt="WhatsApp QR Code" style="width:100%; border-radius:18px; border:1px solid rgba(148,163,184,0.16); box-shadow:0 18px 45px rgba(15,23,42,0.18);" />`
+    : `<div style="padding: 48px 24px; border-radius: 18px; background: rgba(148, 163, 184, 0.08); color: #fff; border: 1px solid rgba(148, 163, 184, 0.16); text-align:center;">Waiting for the QR code to appear once the bot starts. Refresh after the bot is ready.</div>`;
+
+  res.send(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Rest AI - Connected</title>
+          <title>Connect Rest AI</title>
           <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
-            .container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            h1 { color: #25D366; }
+            body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #f8fafc; }
+            .page { min-height: 100vh; padding: 28px; display: flex; align-items: center; justify-content: center; }
+            .panel { width: min(1024px, 100%); display: grid; grid-template-columns: 1fr 1fr; gap: 24px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 28px; padding: 32px; box-shadow: 0 40px 100px rgba(15, 23, 42, 0.35); }
+            .panel h1 { margin: 0 0 16px; font-size: clamp(2rem, 3vw, 3rem); line-height: 1.05; }
+            .panel p { margin: 0 0 22px; color: rgba(226, 232, 240, 0.82); line-height: 1.75; }
+            .card { background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 18px; }
+            .label { color: #94a3b8; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.14em; }
+            .code { font-family: 'Fira Code', monospace; background: rgba(148, 163, 184, 0.08); padding: 18px 20px; border-radius: 16px; border: 1px dashed rgba(148, 163, 184, 0.22); color: #e2e8f0; }
+            .button { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 22px; border-radius: 14px; border: none; font-weight: 700; text-decoration: none; color: #0f172a; background: #38bdf8; }
+            .secondary { background: rgba(255, 255, 255, 0.08); color: #e2e8f0; }
+            .row { display: grid; gap: 18px; }
+            .hint { color: rgba(226, 232, 240, 0.72); font-size: 0.98rem; }
+            .status-chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; background: rgba(34, 197, 94, 0.12); color: #d1fae5; }
+            @media (max-width: 860px) { .panel { grid-template-columns: 1fr; } }
           </style>
         </head>
         <body>
-          <div class="container">
-            <h1>✅ Rest AI Bot Connected!</h1>
-            <p>The bot is now connected to WhatsApp and ready to receive messages.</p>
+          <div class="page">
+            <div class="panel">
+              <div class="card">
+                <span class="label">Connect to WhatsApp</span>
+                <h1>Choose your preferred connection flow</h1>
+                <p>Scan the QR code with your WhatsApp mobile app, or use the secure pairing code to open the bot conversation instantly.</p>
+                <div class="row">
+                  <div>
+                    <div class="label">Pairing code</div>
+                    <div class="code">${pairingCode}</div>
+                    <p class="hint">Tap the button below to open WhatsApp with the pairing code already filled.</p>
+                    <a class="button" href="${whatsappUri}">Open WhatsApp App</a>
+                    <a class="button secondary" href="${waMeLink}" target="_blank">Open WhatsApp Web</a>
+                  </div>
+                  <div>
+                    <div class="label">Scan QR</div>
+                    ${qrcodeHtml}
+                    <p class="hint">If the QR code is visible, simply scan it from the WhatsApp mobile scanner. Refresh once the bot has generated the QR.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="card">
+                <span class="label">Ready for business</span>
+                <h1>Professional connection workflow</h1>
+                <p>This interface keeps the existing bot logic untouched while giving users a polished entry experience. The QR and pairing options are separated so both scan and link flows work reliably.</p>
+                <div class="status-chip">Render deployment ready</div>
+                <div class="status-chip">Auto keepalive enabled</div>
+                <div class="status-chip">Anti-delete protection active</div>
+                <div class="status-chip">AI and group status support</div>
+                <p class="hint">If the bot is connected, it will continue to show a connection confirmation. Use the root landing page again after setup to return here.</p>
+              </div>
+            </div>
           </div>
         </body>
       </html>
     `);
-  }
 });
 
 app.get('/health', (req, res) => {
@@ -258,19 +351,67 @@ function formatSenderReference(senderName, senderJid) {
   return `@${formattedName}`;
 }
 
-async function sendDeletedMessageAlert(entry) {
-  if (!entry || !entry.message) return;
-
-  const senderLabel = entry.senderName || entry.senderJid.replace('@s.whatsapp.net', '');
-  const chatLabel = entry.isGroup ? `group ${entry.remoteJid}` : 'private chat';
-  const textContent = getMessageText(entry.message);
-  const mentionJid = entry.senderJid;
-
-  const header = `Deleted message detected from ${senderLabel} in ${chatLabel}.`;
-  const bodyLines = [header];
-  if (textContent) {
-    bodyLines.push(`Message: ${textContent}`);
+async function safeReact(jid, key, emoji) {
+  try {
+    await sock.sendMessage(jid, { react: { text: emoji, key } });
+  } catch (error) {
+    // Reaction not supported or failed, ignore silently.
   }
+}
+
+async function maybeSendQuotedStatus(replyJid, msg) {
+  const quoted = getQuotedMessage(msg);
+  if (!quoted) return null;
+
+  const quotedText = getMessageText(quoted);
+  const media = extractMediaMessage(quoted);
+
+  if (media) {
+    const buffer = await downloadQuotedMediaBuffer(media.kind, media.payload);
+    if (!buffer) {
+      return 'I found the status media, but I could not download it right now.';
+    }
+
+    const caption = quotedText ? `${quotedText}\n\nREST AI` : 'REST AI';
+    const payload = {
+      [media.kind]: buffer,
+      caption,
+    };
+
+    if (media.kind === 'audio') {
+      payload.mimetype = media.payload.mimetype || 'audio/mp4';
+      payload.ptt = Boolean(media.payload.ptt);
+    }
+
+    await sendTrackedMessage(replyJid, payload);
+    return null;
+  }
+
+  if (quotedText) {
+    return `Captured status from the quoted message:\n${quotedText}`;
+  }
+
+  return 'I found a quoted status message but could not read the content.';
+}
+
+async function sendDeletedMessageAlert(entry) {
+  if (!entry) return;
+
+  const senderLabel =
+    entry.senderName || entry.senderJid.replace('@s.whatsapp.net', '');
+  const chatLabel = entry.isGroup ? `group ${entry.remoteJid}` : 'private chat';
+  const mentionJid = entry.senderJid;
+  const bodyLines = [`Deleted message detected from ${senderLabel} in ${chatLabel}.`];
+
+  if (entry.message) {
+    const textContent = getMessageText(entry.message);
+    if (textContent) {
+      bodyLines.push(`Message: ${textContent}`);
+    }
+  } else {
+    bodyLines.push('Message content was not cached before deletion.');
+  }
+
   bodyLines.push(`Sender: ${senderLabel}`);
   bodyLines.push('REST AI');
 
@@ -1245,205 +1386,6 @@ function formatUptime() {
   return `${hours}h ${minutes}m ${seconds}s`;
 }
 
-async function handleOwnerCommand(command, args, replyJid, senderJid) {
-  switch (command) {
-    case 'help':
-      return buildHelpMenu();
-
-    case 'owner':
-      return [
-        `*${BOT_INFO.name} Owner*`,
-        `Owner number: ${CONFIG.ownerNumber.replace('@s.whatsapp.net', '')}`,
-        `Developer: ${BOT_INFO.developer}`,
-      ].join('\n');
-
-    case 'ping':
-      return 'Pong. I dey active and sharp sharp.';
-
-    case 'alive':
-      return `${BOT_INFO.name} dey online. No worry, I still dey work.`;
-
-    case 'uptime':
-      return `Uptime: ${formatUptime()}`;
-
-    case 'pause':
-      BOT_STATE.paused = !BOT_STATE.paused;
-      return BOT_STATE.paused
-        ? 'Bot don pause. I no go reply normal users until you resume me.'
-        : 'Bot don resume. I fit reply people again.';
-
-    case 'game':
-      return 'Game menu: trivia, riddles, guess number, word battle. Tell me which one you want make we run.';
-
-    case 'tiktok':
-    case 'youtube':
-    case 'facebook':
-    case 'instagram': {
-      const targetUrl = args.join(' ').trim();
-      if (!targetUrl) {
-        return `Send the link like: \`rest ${command} https://example.com/...\``;
-      }
-
-      await sock.sendMessage(replyJid, { text: `I dey fetch the download link now for ${command}...` });
-      const downloadUrl = await downloadMedia(targetUrl);
-      if (!downloadUrl) {
-        return `I no fit get download link for that ${command} link now. Make you try again or send another link.`;
-      }
-
-      return `Download link for your ${command} video:\n${downloadUrl}`;
-    }
-
-    case 'movie': {
-      const query = args.join(' ').trim();
-      if (!query) {
-        return 'Send movie search like: `rest movie Spider-Man`';
-      }
-
-      await sendMovieResults(replyJid, query);
-      return null;
-    }
-
-    case 'tictactoe': {
-      const userData = getUserData(senderJid);
-      userData.ticTacToe = {
-        board: [
-          [' ', ' ', ' '],
-          [' ', ' ', ' '],
-          [' ', ' ', ' '],
-        ],
-        next: 'X',
-        status: 'playing',
-      };
-      saveUserData(senderJid, userData);
-      return `Tic-Tac-Toe started! Use \`rest move <row> <col>\`, for example \`rest move 1 1\`.
-
-${renderTicTacToeBoard(userData.ticTacToe.board)}`;
-    }
-
-    case 'move': {
-      const row = parseInt(args[0], 10) - 1;
-      const col = parseInt(args[1], 10) - 1;
-      if (Number.isNaN(row) || Number.isNaN(col) || row < 0 || row > 2 || col < 0 || col > 2) {
-        return 'Send your move like: `rest move 2 3`. Row and column must be 1, 2 or 3.';
-      }
-
-      const userData = getUserData(senderJid);
-      const game = userData.ticTacToe;
-      if (!game || game.status !== 'playing') {
-        return 'No active Tic-Tac-Toe game. Start one with `rest tictactoe`.';
-      }
-
-      if (game.board[row][col] !== ' ') {
-        return 'That position don full. Choose another one.';
-      }
-
-      game.board[row][col] = game.next;
-      const winner = getTicTacToeWinner(game.board);
-      if (winner) {
-        game.status = winner === 'draw' ? 'draw' : 'finished';
-        saveUserData(senderJid, userData);
-        const boardText = renderTicTacToeBoard(game.board);
-        if (winner === 'draw') {
-          return `The game end draw!\n\n${boardText}`;
-        }
-        return `Na ${winner} win!\n\n${boardText}`;
-      }
-
-      game.next = game.next === 'X' ? 'O' : 'X';
-      saveUserData(senderJid, userData);
-      return `Move recorded. Next player: ${game.next}\n\n${renderTicTacToeBoard(game.board)}`;
-    }
-
-    case 'imagine': {
-      const prompt = args.join(' ').trim();
-      if (!prompt) {
-        return 'Send image prompt like: `rest imagine a cyberpunk Lagos night market`';
-      }
-
-      await sock.sendMessage(replyJid, { text: 'I dey generate the image now. Small time.' });
-      const imageUrl = await generateImage(prompt);
-
-      if (!imageUrl) {
-        return 'Image generation fail. Try another prompt.';
-      }
-
-      await sock.sendMessage(replyJid, {
-        image: { url: imageUrl },
-        caption: `Generated image for: ${prompt}`,
-      });
-      return null;
-    }
-
-    case 'vv':
-      return null;
-
-    default:
-      return 'I no know that command. Use `rest help`.';
-  }
-}
-
-function buildHelpMenu() {
-  const now = new Date();
-  const dateText = new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  }).format(now);
-  const timeText = new Intl.DateTimeFormat('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  }).format(now);
-
-  return [
-    '┏❐ *◈ Rest AI ◈*',
-    '┃',
-    `┃├◆ 👤 Owner: ${BOT_INFO.developer}`,
-    `┃├◆ 📅 Date: ${dateText}`,
-    `┃├◆ ⏰ Time: ${timeText}`,
-    `┃├◆ ⚡ Commands: ${OWNER_COMMANDS.size}+`,
-    `┃├◆ 🔑 Prefix: ${BOT_INFO.commandPrefix} / .`,
-    '┗❐',
-    '',
-    '┏❐ 《 *OWNER MENU* 》 ❐',
-    '┃├◆ .menu / rest help',
-    '┃├◆ .owner',
-    '┃├◆ .ping / .alive / .uptime',
-    '┃├◆ .pause',
-    '┗❐',
-    '',
-    '┏❐ 《 *AI MENU* 》 ❐',
-    '┃├◆ .ai / .gpt [question]',
-    '┃├◆ .img [image prompt]',
-    '┃├◆ rest [question]',
-    '┗❐',
-    '',
-    '┏❐ 《 *MEDIA MENU* 》 ❐',
-    '┃├◆ .vv',
-    '┃├◆ .gcstatus / .swgc [text]',
-    '┗❐',
-    '',
-    '┏❐ 《 *MOVIE MENU* 》 ❐',
-    '┃├◆ .movie / .sm [title]',
-    '┗❐',
-    '',
-    '┏❐ 《 *GAME MENU* 》 ❐',
-    '┃├◆ .game',
-    '┃├◆ .tictactoe',
-    '┃├◆ .move [row] [col]',
-    '┗❐',
-    '',
-    '┏❐ 《 *DOWNLOAD MENU* 》 ❐',
-    '┃├◆ .youtube / .ytmp3 / .ytmp4 / .song / .ytvid [url]',
-    '┃├◆ .facebook [url]',
-    '┃├◆ .instagram / .igdl [url]',
-    '┃├◆ .tiktok / .ttdl [url]',
-    '┗❐',
-    '',
-    '_Powered by Rest AI © 2026_',
-  ].join('\n');
-}
-
 function handleAskCommandExamples(command) {
   if (command === 'ai' || command === 'ask') {
     return 'Send a question like `.ai who be your developer?`';
@@ -1452,7 +1394,7 @@ function handleAskCommandExamples(command) {
   return `Use \`${BOT_INFO.commandPrefix}${command}\``;
 }
 
-async function handleOwnerCommand(command, args, replyJid, senderJid) {
+async function handleOwnerCommand(command, args, replyJid, senderJid, msg) {
   const rawArgs = args.join(' ').trim();
 
   switch (command) {
@@ -1480,13 +1422,21 @@ async function handleOwnerCommand(command, args, replyJid, senderJid) {
       BOT_STATE.paused = false;
       return 'Bot don resume. I fit reply people again.';
 
-    case 'status':
+    case 'status': {
+      if (msg) {
+        const quotedStatus = await maybeSendQuotedStatus(replyJid, msg);
+        if (quotedStatus !== null) {
+          return quotedStatus;
+        }
+      }
+
       return [
         `*${BOT_INFO.name} Status*`,
         `Paused: ${BOT_STATE.paused ? 'yes' : 'no'}`,
         `Uptime: ${formatUptime()}`,
         `Prefix: ${BOT_INFO.commandPrefix}`,
       ].join('\n');
+    }
 
     case 'prefix':
       return `Command prefix don change to \`${BOT_INFO.commandPrefix}\` only. Example: \`.menu\``;
@@ -1842,9 +1792,21 @@ async function connectToWhatsApp() {
 
     if (msg.message?.protocolMessage?.type === 0 || msg.messageStubType === 0) {
       const deletedKey = msg.message?.protocolMessage?.key || msg.key;
+      const remoteJid = msg.key.remoteJid;
+      const isGroup = remoteJid?.endsWith('@g.us');
+      const senderJid = getSenderId(msg, isGroup, remoteJid);
       const cached = getCachedMessage(deletedKey?.id);
       if (cached) {
         await sendDeletedMessageAlert(cached);
+      } else {
+        await sendDeletedMessageAlert({
+          remoteJid,
+          senderJid,
+          senderName: msg.pushName || msg.pushname || msg.notify || senderJid,
+          isGroup,
+          message: null,
+          timestamp: Date.now(),
+        });
       }
       return;
     }
@@ -1876,43 +1838,35 @@ async function connectToWhatsApp() {
       OWNER_COMMANDS.has(parsedCommand.command) &&
       (hasCommandPrefix || isOwnerSelfDm);
 
+    const replyJid = remoteJid;
+
+    if (isGroup && parsedCommand.command === 'gcstatus') {
+      const caption = parsedCommand.args.join(' ').trim();
+      const result = await sendGroupStatusMessage(replyJid, msg, caption);
+      if (result) {
+        await sendTrackedMessage(replyJid, { text: result });
+      } else {
+        await sendTrackedMessage(replyJid, { text: 'Group status sent.' });
+      }
+      return;
+    }
+
     if (msg.key.fromMe && !isOwnerSelfDm && !ownerCommand) return;
 
     if (isGroup && !ownerCommand && !shouldReplyInGroup(msg, text)) {
       return;
     }
 
-    const replyJid = remoteJid;
-
     console.log(`Message from ${senderJid} in ${replyJid}: ${text}`);
 
     try {
       if (ownerCommand) {
-        if (parsedCommand.command === 'help') {
-          await sendHelpMenu(replyJid);
-          return;
+        if (parsedCommand.command === 'status') {
+          await safeReact(replyJid, msg.key, '✅');
         }
 
-        if (parsedCommand.command === 'gcstatus') {
-          if (!isGroup) {
-            await sendTrackedMessage(replyJid, { text: 'Group only command.' });
-            return;
-          }
-
-          const isAdmin = await isGroupAdmin(replyJid, senderJid);
-          if (!isAdmin) {
-            await sendTrackedMessage(replyJid, { text: 'Admin only command.' });
-            return;
-          }
-
-          const caption = parsedCommand.args.join(' ').trim();
-          const result = await sendGroupStatusMessage(replyJid, msg, caption);
-          if (result) {
-            await sendTrackedMessage(replyJid, { text: result });
-            return;
-          }
-
-          await sendTrackedMessage(replyJid, { text: 'Group status sent.' });
+        if (parsedCommand.command === 'help') {
+          await sendHelpMenu(replyJid);
           return;
         }
 
@@ -1980,7 +1934,7 @@ async function connectToWhatsApp() {
           return;
         }
 
-        const response = await handleOwnerCommand(parsedCommand.command, parsedCommand.args, replyJid, senderJid);
+        const response = await handleOwnerCommand(parsedCommand.command, parsedCommand.args, replyJid, senderJid, msg);
         if (response) {
           await sendTrackedMessage(replyJid, { text: response });
         }
