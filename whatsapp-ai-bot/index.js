@@ -42,7 +42,7 @@ loadEnvFile(path.join(__dirname, '.env'));
 const CONFIG = {
   botNumber: process.env.BOT_NUMBER || '2349031646071@s.whatsapp.net',
   ownerNumber: process.env.OWNER_NUMBER || '2349031646071@s.whatsapp.net',
-  authDir: path.join(__dirname, 'auth_info_multi'),
+  authDir: process.env.SESSION_DIR || '/app/session',
   usersDb: path.join(__dirname, 'users.json'),
   metaAiApi: 'https://apis.davidcyril.name.ng/ai/metaai',
   fluxApi: 'https://apis.davidcyril.name.ng/fluxv2',
@@ -321,6 +321,8 @@ const BOT_STATE = {
   paused: false,
   startTime: Date.now(),
   sentMessageIds: [],
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 10,
 };
 
 const MESSAGE_CACHE = new Map();
@@ -1814,21 +1816,28 @@ function buildHelpMenu() {
   ].join('\n');
 }
 
-async function connectToWhatsApp() {
-  if (!fs.existsSync(CONFIG.authDir)) {
-    fs.mkdirSync(CONFIG.authDir, { recursive: true });
-  }
+async function connectToWhatsApp(isRetry = false) {
+  try {
+    if (!fs.existsSync(CONFIG.authDir)) {
+      fs.mkdirSync(CONFIG.authDir, { recursive: true });
+      console.log(`✅ Created session directory: ${CONFIG.authDir}`);
+    }
 
-  const { state, saveCreds } = await useMultiFileAuthState(CONFIG.authDir);
+    console.log(`🔌 Initializing WhatsApp connection from: ${CONFIG.authDir}`);
+    const { state, saveCreds } = await useMultiFileAuthState(CONFIG.authDir);
 
-  sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: true,
-    logger: silentLogger,
-    browser: ['Rest AI', 'Chrome', '1.0.0'],
-    connectTimeoutMs: 60000,
-    qrTimeout: 60000,
-  });
+    sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: true,
+      logger: silentLogger,
+      browser: ['Rest AI', 'Chrome', '1.0.0'],
+      connectTimeoutMs: 90000,
+      qrTimeout: 120000,
+      keepAliveIntervalMs: 30000,
+      defaultQueryTimeoutMs: 60000,
+      retryRequestDelayMs: 250,
+      maxRetries: 5,
+    });
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -1857,23 +1866,42 @@ async function connectToWhatsApp() {
     if (connection === 'open') {
       console.log('✅ Successfully connected to WhatsApp!');
       console.log('🤖 Rest AI Bot is now online and ready to receive messages.');
-      currentQR = null; // Clear QR code once connected
+      console.log(`📂 Session persisted at: ${CONFIG.authDir}`);
+      currentQR = null;
+      BOT_STATE.reconnectAttempts = 0;
     }
 
     if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('❌ Connection closed.');
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401;
+      console.log(`❌ Connection closed with status: ${statusCode}`);
 
       if (shouldReconnect) {
-        console.log('🔄 Reconnecting in 5 seconds...');
-        setTimeout(() => connectToWhatsApp(), 5000);
+        BOT_STATE.reconnectAttempts++;
+        if (BOT_STATE.reconnectAttempts <= BOT_STATE.maxReconnectAttempts) {
+          const backoffMs = Math.min(30000, 1000 * Math.pow(2, BOT_STATE.reconnectAttempts - 1));
+          console.log(`🔄 Reconnect attempt ${BOT_STATE.reconnectAttempts}/${BOT_STATE.maxReconnectAttempts} in ${backoffMs}ms...`);
+          setTimeout(() => connectToWhatsApp(true), backoffMs);
+        } else {
+          console.error(`🚫 Max reconnection attempts (${BOT_STATE.maxReconnectAttempts}) reached. Manual restart required.`);
+          process.exit(1);
+        }
       } else {
-        console.log('🚫 Logged out from WhatsApp. Please delete the auth_info_multi folder and restart the bot.');
+        console.log('🚫 Logged out from WhatsApp (status code ' + statusCode + '). Session needs to be re-paired.');
+        BOT_STATE.reconnectAttempts = 0;
       }
     }
   });
 
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('creds.update', async () => {
+    console.log('💾 Saving WhatsApp credentials...');
+    try {
+      await saveCreds();
+      console.log('✅ Credentials saved successfully.');
+    } catch (error) {
+      console.error('❌ Failed to save credentials:', error.message);
+    }
+  });
 
   sock.ev.on('messages.upsert', async (event) => {
     const msg = event.messages?.[0];
@@ -2117,6 +2145,14 @@ async function connectToWhatsApp() {
       }
     }
   });
+  } catch (error) {
+    console.error('❌ Failed to initialize WhatsApp connection:', error.message);
+    console.error(error.stack);
+    const backoffMs = Math.min(30000, 1000 * Math.pow(2, BOT_STATE.reconnectAttempts));
+    BOT_STATE.reconnectAttempts++;
+    console.log(`🔄 Retrying connection in ${backoffMs}ms...`);
+    setTimeout(() => connectToWhatsApp(true), backoffMs);
+  }
 }
 
 console.log(`Starting ${BOT_INFO.name} v${BOT_INFO.version}`);
@@ -2127,7 +2163,50 @@ console.log(`Command prefix: ${BOT_INFO.commandPrefix}`);
 console.log('AI provider: David Cyril Meta AI endpoint');
 console.log('Image provider: David Cyril Flux V2 endpoint');
 
+// =======================
+// PROCESS ERROR HANDLING
+// =======================
+process.on('uncaughtException', (error) => {
+  console.error('🔥 Uncaught Exception:', error);
+  console.error(error.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, gracefully shutting down...');
+  if (sock) {
+    try {
+      await sock.ev.removeAllListeners();
+      sock.ws?.close?.();
+      sock.end?.();
+    } catch (e) {
+      console.error('Error during graceful shutdown:', e.message);
+    }
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT received, gracefully shutting down...');
+  if (sock) {
+    try {
+      await sock.ev.removeAllListeners();
+      sock.ws?.close?.();
+      sock.end?.();
+    } catch (e) {
+      console.error('Error during graceful shutdown:', e.message);
+    }
+  }
+  process.exit(0);
+});
+
+console.log(`\n🚀 Starting bot with persistent session at: ${CONFIG.authDir}\n`);
 connectToWhatsApp().catch((error) => {
-  console.error('Failed to start bot:', error.message);
+  console.error('❌ Failed to start bot:', error.message);
+  console.error(error.stack);
   process.exit(1);
 });

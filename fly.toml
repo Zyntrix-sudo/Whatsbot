@@ -10,6 +10,7 @@ primary_region = "iad"
   # For example:
   # BOT_NUMBER = "your-number@s.whatsapp.net"
   # OWNER_NUMBER = "your-number@s.whatsapp.net"
+  SESSION_DIR = "/app/session"
 
 [http_service]
   internal_port = 3000
@@ -21,7 +22,17 @@ primary_region = "iad"
     port = 443
     handlers = ["tls", "http"]
 
+[http_service.checks]
+  interval = 60000
+  timeout = 10000
+  grace_period = "30s"
+
 [[mounts]]
-  source = "auth_info_multi"
-  destination = "/app/auth_info_multi"
+  source = "whatsapp_session"
+  destination = "/app/session"
+
+[vm]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
 
