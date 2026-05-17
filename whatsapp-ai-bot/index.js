@@ -85,6 +85,7 @@ app.get('/', (req, res) => {
             .button { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 24px; border-radius: 14px; border: none; font-weight: 700; cursor: pointer; text-decoration: none; color: #fff; }
             .button.primary { background: linear-gradient(135deg, #38bdf8, #22c55e); }
             .button.secondary { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; }
+            .button.tertiary { background: rgba(255, 255, 255, 0.08); color: #f8fafc; border: 1px solid rgba(255, 255, 255, 0.14); }
             .sidebar { display: flex; flex-direction: column; gap: 18px; justify-content: center; }
             .badge { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; background: rgba(34, 197, 94, 0.12); color: #d1fae5; font-size: 0.95rem; }
             .feature { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: 18px; background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.12); }
@@ -104,6 +105,7 @@ app.get('/', (req, res) => {
                 <div class="buttons">
                   <a class="button primary" href="/connect">Connect to WhatsApp</a>
                   <a class="button secondary" href="/health">Check Status</a>
+                  <a class="button tertiary" href="https://whatsapp.com/channel/0029VbCFEZv60eBdlqXqQz20" target="_blank">View Channel</a>
                 </div>
                 <div class="footer">Deploy with Render and keep your bot live with automatic health pings and a modern connection experience.</div>
               </div>
@@ -171,6 +173,7 @@ app.get('/connect', (req, res) => {
                     <p class="hint">Tap the button below to open WhatsApp with the pairing code already filled.</p>
                     <a class="button" href="${whatsappUri}">Open WhatsApp App</a>
                     <a class="button secondary" href="${waMeLink}" target="_blank">Open WhatsApp Web</a>
+                    <a class="button tertiary" href="https://whatsapp.com/channel/0029VbCFEZv60eBdlqXqQz20" target="_blank">View Channel</a>
                   </div>
                   <div>
                     <div class="label">Scan QR</div>
@@ -489,6 +492,88 @@ const EIGHT_BALL_ANSWERS = [
 ];
 
 const BOT_PHONE = CONFIG.botNumber.replace('@s.whatsapp.net', '');
+const BOT_CHANNEL_URL = 'https://whatsapp.com/channel/0029VbCFEZv60eBdlqXqQz20';
+
+const BOT_THUMBNAIL_QUOTE = {
+  key: {
+    fromMe: false,
+    participant: '0@s.whatsapp.net',
+    remoteJid: 'status@broadcast',
+  },
+  message: {
+    contactMessage: {
+      displayName: 'WhatsApp Business ✅',
+      vcard: 'BEGIN:VCARD\nVERSION:3.0\nFN:WhatsApp Business\nORG:WhatsApp Inc.\nEND:VCARD',
+    },
+  },
+};
+
+function buildMentionText(mentionJid) {
+  if (!mentionJid) return '';
+  const username = String(mentionJid).replace(/@.*$/, '');
+  return `@${username}`;
+}
+
+function addMentionToPayload(payload, mentionJid) {
+  if (!mentionJid) return payload;
+  const mentionText = buildMentionText(mentionJid);
+  if (payload.text) {
+    payload.text = `${mentionText} ${payload.text}`;
+  }
+  if (payload.caption) {
+    payload.caption = `${mentionText} ${payload.caption}`;
+  }
+  return payload;
+}
+
+function attachChannelButton(payload) {
+  if (!payload || payload.listMessage || payload.buttonsMessage || payload.templateMessage) {
+    return payload;
+  }
+
+  if (!payload.templateButtons) {
+    payload.templateButtons = [
+      {
+        urlButton: {
+          displayText: 'View Channel',
+          url: BOT_CHANNEL_URL,
+        },
+      },
+    ];
+  }
+
+  if (!payload.footer) {
+    payload.footer = 'Tap below to view the WhatsApp channel.';
+  }
+
+  return payload;
+}
+
+function getMentionsFromMessage(message) {
+  const contextInfo = getContextInfo(message);
+  return contextInfo?.mentionedJid || [];
+}
+
+async function sendBotReply(jid, payload, mentionJid, options = {}) {
+  const mergedPayload = attachChannelButton({ ...payload });
+  const mergedOptions = { ...options };
+
+  if (!mergedOptions.quoted) {
+    mergedOptions.quoted = BOT_THUMBNAIL_QUOTE;
+  }
+
+  const contextInfo = mergedOptions.contextInfo || mergedPayload.contextInfo || {};
+  const mentioned = new Set([...(contextInfo.mentionedJid || [])]);
+  if (mentionJid) mentioned.add(mentionJid);
+  if (mentioned.size > 0) {
+    mergedOptions.contextInfo = { ...contextInfo, mentionedJid: [...mentioned] };
+  } else if (Object.keys(contextInfo).length > 0) {
+    mergedOptions.contextInfo = contextInfo;
+  }
+
+  addMentionToPayload(mergedPayload, mentionJid);
+  return sendTrackedMessage(jid, mergedPayload, mergedOptions);
+}
 
 let sock;
 
@@ -507,8 +592,12 @@ function consumeSentMessage(messageId) {
   return true;
 }
 
-async function sendTrackedMessage(jid, payload, options) {
-  const sent = await sock.sendMessage(jid, payload, options);
+async function sendTrackedMessage(jid, payload, options = {}) {
+  const mergedOptions = { ...options };
+  if (!mergedOptions.quoted) {
+    mergedOptions.quoted = BOT_THUMBNAIL_QUOTE;
+  }
+  const sent = await sock.sendMessage(jid, payload, mergedOptions);
   rememberSentMessage(sent?.key?.id);
   return sent;
 }
@@ -923,7 +1012,7 @@ async function sendGroupStatusMessage(groupJid, sourceMessage, caption) {
 }
 
 function shouldReplyInGroup(msg, text) {
-  const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+  const mentioned = getMentionsFromMessage(msg.message);
   const normalizedText = text.replace(/\s+/g, '');
   return mentioned.includes(CONFIG.botNumber) || normalizedText.includes(BOT_PHONE);
 }
@@ -961,7 +1050,7 @@ function buildAiPrompt(userData, text, isGroup) {
     : 'This user has chatted with you before, so greet them as a returning contact.';
 
   const groupLine = isGroup
-    ? 'This message came from a WhatsApp group. Answer the question directly and avoid replying to the whole group unless explicitly required.'
+    ? 'This message came from a WhatsApp group. If you are mentioned, reply directly and mention the sender in your answer. Do not respond to every group message unless explicitly required.'
     : 'This message came from a private chat.';
 
   return [
@@ -1344,12 +1433,12 @@ async function searchMovies(query) {
 async function sendMovieResults(replyJid, query) {
   const movies = await searchMovies(query);
   if (!movies.length) {
-    await sendTrackedMessage(replyJid, { text: `No movie results found for "${query}". Try another title.` });
+    await sendBotReply(replyJid, { text: `No movie results found for "${query}". Try another title.` });
     return;
   }
 
   const listMessage = buildMovieListMessage(query, movies);
-  await sendTrackedMessage(replyJid, listMessage);
+  await sendBotReply(replyJid, listMessage);
 }
 
 async function generateImage(prompt) {
@@ -1452,7 +1541,7 @@ async function handleOwnerCommand(command, args, replyJid, senderJid, msg) {
         return `Send the link like: \`.${command} https://example.com/...\``;
       }
 
-      await sendTrackedMessage(replyJid, { text: `I dey fetch the download link now for ${command}...` });
+      await sendBotReply(replyJid, { text: `I dey fetch the download link now for ${command}...` });
       const downloadUrl = await downloadMedia(rawArgs);
       if (!downloadUrl) {
         return `I no fit get download link for that ${command} link now. Make you try again or send another link.`;
@@ -1568,14 +1657,14 @@ async function handleOwnerCommand(command, args, replyJid, senderJid, msg) {
         return 'Send image prompt like: `.img a cyberpunk Lagos night market`';
       }
 
-      await sendTrackedMessage(replyJid, { text: 'I dey generate the image now. Small time.' });
+      await sendBotReply(replyJid, { text: 'I dey generate the image now. Small time.' });
       const imageUrl = await generateImage(rawArgs);
 
       if (!imageUrl) {
         return 'Image generation fail. Try another prompt.';
       }
 
-      await sendTrackedMessage(replyJid, {
+      await sendBotReply(replyJid, {
         image: { url: imageUrl },
         caption: `Generated image for: ${rawArgs}`,
       });
@@ -1674,7 +1763,7 @@ async function handleOwnerCommand(command, args, replyJid, senderJid, msg) {
 }
 
 async function sendHelpMenu(replyJid) {
-  await sendTrackedMessage(replyJid, {
+  await sendBotReply(replyJid, {
     image: { url: BOT_INFO.menuImage },
     caption: buildHelpMenu(),
   });
@@ -1844,9 +1933,9 @@ async function connectToWhatsApp() {
       const caption = parsedCommand.args.join(' ').trim();
       const result = await sendGroupStatusMessage(replyJid, msg, caption);
       if (result) {
-        await sendTrackedMessage(replyJid, { text: result });
+        await sendBotReply(replyJid, { text: result }, senderJid);
       } else {
-        await sendTrackedMessage(replyJid, { text: 'Group status sent.' });
+        await sendBotReply(replyJid, { text: 'Group status sent.' }, senderJid);
       }
       return;
     }
@@ -1873,17 +1962,17 @@ async function connectToWhatsApp() {
         if (parsedCommand.command === 'vv') {
           const quotedMessage = getQuotedMessage(msg);
           if (!quotedMessage) {
-            await sendTrackedMessage(replyJid, { text: 'Reply to a view-once image, video, or audio with `.vv`.' });
+            await sendBotReply(replyJid, { text: 'Reply to a view-once image, video, or audio with `.vv`.' }, senderJid);
             return;
           }
 
           const media = getQuotedMedia(quotedMessage);
           if (!media) {
-            await sendTrackedMessage(replyJid, { text: 'No supported media found in that quoted message.' });
+            await sendBotReply(replyJid, { text: 'No supported media found in that quoted message.' }, senderJid);
             return;
           }
 
-          await sendTrackedMessage(replyJid, { text: `I am retrieving the ${media.kind} for you now...` });
+          await sendBotReply(replyJid, { text: `I am retrieving the ${media.kind} for you now...` }, senderJid);
           const buffer = await downloadQuotedMediaBuffer(media.kind, media.payload);
           const captionParts = [];
           if (media.payload.caption) {
@@ -1896,14 +1985,14 @@ async function connectToWhatsApp() {
             [media.kind]: buffer,
             caption: captionParts.join('\n'),
           };
-          await sendTrackedMessage(replyJid, sendPayload);
+          await sendBotReply(replyJid, sendPayload, senderJid);
           return;
         }
 
         if (parsedCommand.command === 'ask') {
           const promptText = parsedCommand.args.join(' ').trim();
           if (!promptText) {
-            await sendTrackedMessage(replyJid, { text: handleAskCommandExamples('ask') });
+            await sendBotReply(replyJid, { text: handleAskCommandExamples('ask') }, senderJid);
             return;
           }
 
@@ -1929,14 +2018,14 @@ async function connectToWhatsApp() {
           userData.firstTime = false;
           saveUserData(senderJid, userData);
 
-          await sendTrackedMessage(replyJid, { text: finalReply });
+          await sendBotReply(replyJid, { text: finalReply }, senderJid);
           await sock.sendPresenceUpdate('available', replyJid);
           return;
         }
 
         const response = await handleOwnerCommand(parsedCommand.command, parsedCommand.args, replyJid, senderJid, msg);
         if (response) {
-          await sendTrackedMessage(replyJid, { text: response });
+          await sendBotReply(replyJid, { text: response }, senderJid);
         }
         return;
       }
@@ -1968,23 +2057,23 @@ async function connectToWhatsApp() {
       if (isImagePrompt(aiInputText)) {
         const prompt = extractImagePrompt(aiInputText);
         if (!prompt) {
-          await sendTrackedMessage(replyJid, {
+          await sendBotReply(replyJid, {
             text: 'Tell me wetin you want make I generate. Example: generate image of a red Ferrari for Lagos street.',
-          });
+          }, senderJid);
           await sock.sendPresenceUpdate('available', replyJid);
           return;
         }
 
         const imageUrl = await generateImage(prompt);
         if (imageUrl) {
-          await sendTrackedMessage(replyJid, {
+          await sendBotReply(replyJid, {
             image: { url: imageUrl },
             caption: `Oya, your image don land.\nPrompt: ${prompt}`,
-          });
+          }, senderJid);
         } else {
-          await sendTrackedMessage(replyJid, {
+          await sendBotReply(replyJid, {
             text: 'I try generate the image but e no work. Try another prompt small.',
-          });
+          }, senderJid);
         }
 
         userData.conversationHistory.push({
@@ -2015,14 +2104,14 @@ async function connectToWhatsApp() {
       userData.firstTime = false;
       saveUserData(senderJid, userData);
 
-      await sendTrackedMessage(replyJid, { text: finalReply });
+      await sendBotReply(replyJid, { text: finalReply }, senderJid);
       await sock.sendPresenceUpdate('available', replyJid);
     } catch (error) {
       console.error('Message handler error:', error.message);
       try {
-        await sendTrackedMessage(replyJid, {
+        await sendBotReply(replyJid, {
           text: 'Something break small for my side. Try again in a bit.',
-        });
+        }, senderJid);
       } catch (sendError) {
         console.error('Failed to send error message:', sendError.message);
       }

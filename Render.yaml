@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: rest-ai-whatsapp-bot
+    env: node
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: OPENAI_API_KEY
+        value: ""
+      - key: KEEPALIVE_URL
+        value: "http://127.0.0.1:10000/health"
