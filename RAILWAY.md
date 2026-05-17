@@ -1,4 +1,6 @@
-Deployment notes for Railway:
+Deployment notes for Railway (secondary)
+
+Render is the recommended deployment target for this project — see `DEPLOYMENT_GUIDE.md` and `Render.yaml` for the preferred configuration. If you still want to use Railway, keep these tips in mind:
 
 - Railway auto-detects Node.js projects via `package.json`. Ensure `start` script exists (it does: `npm start`).
 - Set Node version in Railway project settings to `18.x` or `20.x` to match `package.json` engines.
@@ -16,4 +18,4 @@ Deployment notes for Railway:
 Troubleshooting tips:
 - Run `npm ci` or `npm install` locally to reproduce install errors before deploying.
 - If a package fails building due to Node version, pick the Node LTS matching the package requirements.
-- Use a `Dockerfile` for full environment reproducibility on Railway if native build issues persist.
+- Use the included `Dockerfile` for full environment reproducibility on Railway if native build issues persist; Docker removes most platform-specific native build problems.
